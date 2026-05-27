@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { UploadCloud, FileSpreadsheet, ChevronRight, BarChart3, AlertCircle, Building2, TrendingUp, TrendingDown, LogOut, Search, X, ChevronDown, Activity, PieChart as PieChartIcon, ShieldCheck, Wallet, Flame, Menu, ChevronLeft, Download, Printer } from "lucide-react";
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, PieChart, Pie, Sector, ComposedChart, ReferenceLine, ScatterChart, Scatter, ZAxis, LabelList } from 'recharts';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, PieChart, Pie, Sector, ComposedChart, ReferenceLine, ScatterChart, Scatter, ZAxis, LabelList, AreaChart, Area } from 'recharts';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -600,6 +600,13 @@ export default function Home() {
     });
   }, [selectedTickers, sectorOverview]);
 
+  const yoeaCofSpreadData = useMemo(() => {
+    return yoeaCofTrendData.map((item: any) => ({
+      ...item,
+      spread: [item.COF, item.YOEA]
+    }));
+  }, [yoeaCofTrendData]);
+
   const growthTrendData = useMemo(() => {
     if (selectedTickers.length !== 1 || !sectorOverview) return [];
     const ticker = selectedTickers[0];
@@ -628,6 +635,7 @@ export default function Home() {
       const ldr = getVal("LDR");
       const mdhLoans = getVal("MediumTermLoans") + getVal("LongTermLoans");
       const ltLiab = getVal("BL_TotalLiab_1_5Y") + getVal("BL_TotalLiab_Over5Y");
+      const cof = getVal("COF");
       
       const stUsedForMdh = Math.max(0, mdhLoans - ltLiab);
       const sml = mdhLoans > 0 ? (stUsedForMdh / mdhLoans) * 100 : 0;
@@ -635,7 +643,8 @@ export default function Home() {
       return {
         period: p,
         LDR: ldr,
-        SML: parseFloat(sml.toFixed(2))
+        SML: parseFloat(sml.toFixed(2)),
+        COF: cof
       };
     });
   }, [selectedTickers, sectorOverview]);
@@ -723,12 +732,12 @@ export default function Home() {
       return (
         <div style={{ backgroundColor: 'var(--bg-main)', padding: '12px', border: '1px solid var(--border-color)', borderRadius: '8px', boxShadow: 'var(--shadow-md)' }}>
           <p style={{ margin: '0 0 8px 0', fontWeight: 700, fontSize: '1rem', color: 'var(--accent-color)' }}>{data.ticker}</p>
-          <p style={{ margin: '0 0 4px 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Giá: <span style={{ color: 'var(--text-main)', fontWeight: 600 }}>{new Intl.NumberFormat('vi-VN').format(data.price)} VNĐ</span></p>
+          <p style={{ margin: '0 0 4px 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Price: <span style={{ color: 'var(--text-main)', fontWeight: 600 }}>{new Intl.NumberFormat('en-US').format(data.price)} VND</span></p>
           <p style={{ margin: '0 0 4px 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>P/E: <span style={{ color: 'var(--text-main)', fontWeight: 600 }}>{data.pe !== null ? `${data.pe}x` : 'N/A'}</span></p>
           <p style={{ margin: '0 0 4px 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>EPS Growth: <span style={{ color: 'var(--text-main)', fontWeight: 600 }}>{data.eps_growth}%</span></p>
           <p style={{ margin: '0 0 4px 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>P/B: <span style={{ color: 'var(--text-main)', fontWeight: 600 }}>{data.pb !== null ? `${data.pb}x` : 'N/A'}</span></p>
           <p style={{ margin: '0 0 4px 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>ROE: <span style={{ color: 'var(--text-main)', fontWeight: 600 }}>{data.roe}%</span></p>
-          <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Vốn hóa: <span style={{ color: 'var(--text-main)', fontWeight: 600 }}>{formatNumber(data.market_cap / 1e9)} tỷ VNĐ</span></p>
+          <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Market Cap: <span style={{ color: 'var(--text-main)', fontWeight: 600 }}>{formatNumber(data.market_cap / 1e9)}B VND</span></p>
         </div>
       );
     }
@@ -853,7 +862,7 @@ export default function Home() {
                       backgroundColor: item.status === 'success' ? '#e6f4ea' : item.status === 'error' ? '#fce8e6' : item.status === 'uploading' ? '#fef7e0' : '#f1f3f4',
                       color: item.status === 'success' ? '#137333' : item.status === 'error' ? '#c5221f' : item.status === 'uploading' ? '#b06000' : '#5f6368'
                     }}>
-                      {item.status === 'success' ? 'Thành công' : item.status === 'error' ? 'Lỗi' : item.status === 'uploading' ? 'Đang tải...' : 'Chờ'}
+                      {item.status === 'success' ? 'Success' : item.status === 'error' ? 'Error' : item.status === 'uploading' ? 'Uploading...' : 'Pending'}
                     </span>
                   </div>
                 ))}
@@ -968,15 +977,15 @@ export default function Home() {
 
             {/* STATE 1: OVERALL COMPARISON (PEER COMPARISON) */}
             {sectorOverview && selectedTickers.length === 0 && (
-              <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '48px' }}>
+              <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
                 
                 {/* Module 0: Valuation (P/E vs EPS Growth, P/B vs ROE) */}
                 <section>
                   <h3 style={{ fontSize: '1.6rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <BarChart3 color="var(--accent-color)" /> Valuation (Định giá & Hiệu quả)
+                    <BarChart3 color="var(--accent-color)" /> Valuation (Pricing & Efficiency)
                   </h3>
                   
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px', marginBottom: '32px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
                     
                     {/* Bubble Chart 1: PE vs EPS Growth */}
                     <div className="card" style={{ padding: '24px' }}>
@@ -992,15 +1001,15 @@ export default function Home() {
                               <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
                               <XAxis type="number" dataKey="eps_growth" name="EPS Growth" unit="%" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} label={{ value: 'EPS Growth (%)', position: 'insideBottom', offset: -5, fill: 'var(--text-secondary)', fontSize: 11 }} />
                               <YAxis type="number" dataKey="pe" name="P/E" unit="x" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} domain={[0, 'dataMax + 4']} label={{ value: 'P/E (x)', angle: -90, position: 'insideLeft', fill: 'var(--text-secondary)', fontSize: 11 }} />
-                              <ZAxis type="number" dataKey="market_cap" range={[80, 500]} name="Vốn hóa" unit=" tỷ VNĐ" />
+                              <ZAxis type="number" dataKey="market_cap" range={[80, 500]} name="Market Cap" unit="B VND" />
                               <Tooltip cursor={{ strokeDasharray: '3 3' }} content={<CustomBubbleTooltip />} />
                               {valuationAnalysis && valuationAnalysis.avgPE !== null && (
-                                <ReferenceLine y={valuationAnalysis.avgPE} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ value: `PE TB: ${valuationAnalysis.avgPE.toFixed(1)}x`, fill: '#e74c3c', fontSize: 10, fontWeight: 600, position: 'right' }} />
+                                <ReferenceLine y={valuationAnalysis.avgPE} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ value: `Avg PE: ${valuationAnalysis.avgPE.toFixed(1)}x`, fill: '#e74c3c', fontSize: 10, fontWeight: 600, position: 'right' }} />
                               )}
                               {valuationAnalysis && valuationAnalysis.avgEPSGrowth !== null && (
-                                <ReferenceLine x={valuationAnalysis.avgEPSGrowth} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ value: `Growth TB: ${valuationAnalysis.avgEPSGrowth.toFixed(1)}%`, fill: '#e74c3c', fontSize: 10, fontWeight: 600, position: 'top' }} />
+                                <ReferenceLine x={valuationAnalysis.avgEPSGrowth} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ value: `Avg Growth: ${valuationAnalysis.avgEPSGrowth.toFixed(1)}%`, fill: '#e74c3c', fontSize: 10, fontWeight: 600, position: 'top' }} />
                               )}
-                              <Scatter name="Cổ phiếu" data={sectorValuation.map(item => ({...item, market_cap_bil: item.market_cap / 1e9}))}>
+                              <Scatter name="Stock" data={sectorValuation.map(item => ({...item, market_cap_bil: item.market_cap / 1e9}))}>
                                 {sectorValuation.map((entry, index) => (
                                   <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
                                 ))}
@@ -1026,15 +1035,15 @@ export default function Home() {
                               <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
                               <XAxis type="number" dataKey="roe" name="ROE" unit="%" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} label={{ value: 'ROE (%)', position: 'insideBottom', offset: -5, fill: 'var(--text-secondary)', fontSize: 11 }} />
                               <YAxis type="number" dataKey="pb" name="P/B" unit="x" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} domain={[0, 'dataMax + 0.5']} label={{ value: 'P/B (x)', angle: -90, position: 'insideLeft', fill: 'var(--text-secondary)', fontSize: 11 }} />
-                              <ZAxis type="number" dataKey="market_cap" range={[80, 500]} name="Vốn hóa" unit=" tỷ VNĐ" />
+                              <ZAxis type="number" dataKey="market_cap" range={[80, 500]} name="Market Cap" unit="B VND" />
                               <Tooltip cursor={{ strokeDasharray: '3 3' }} content={<CustomBubbleTooltip />} />
                               {valuationAnalysis && valuationAnalysis.avgPB !== null && (
-                                <ReferenceLine y={valuationAnalysis.avgPB} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ value: `PB TB: ${valuationAnalysis.avgPB.toFixed(1)}x`, fill: '#e74c3c', fontSize: 10, fontWeight: 600, position: 'right' }} />
+                                <ReferenceLine y={valuationAnalysis.avgPB} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ value: `Avg PB: ${valuationAnalysis.avgPB.toFixed(1)}x`, fill: '#e74c3c', fontSize: 10, fontWeight: 600, position: 'right' }} />
                               )}
                               {valuationAnalysis && valuationAnalysis.avgROE !== null && (
-                                <ReferenceLine x={valuationAnalysis.avgROE} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ value: `ROE TB: ${valuationAnalysis.avgROE.toFixed(1)}%`, fill: '#e74c3c', fontSize: 10, fontWeight: 600, position: 'top' }} />
+                                <ReferenceLine x={valuationAnalysis.avgROE} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ value: `Avg ROE: ${valuationAnalysis.avgROE.toFixed(1)}%`, fill: '#e74c3c', fontSize: 10, fontWeight: 600, position: 'top' }} />
                               )}
-                              <Scatter name="Cổ phiếu" data={sectorValuation.map(item => ({...item, market_cap_bil: item.market_cap / 1e9}))}>
+                              <Scatter name="Stock" data={sectorValuation.map(item => ({...item, market_cap_bil: item.market_cap / 1e9}))}>
                                 {sectorValuation.map((entry, index) => (
                                   <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
                                 ))}
@@ -1051,10 +1060,10 @@ export default function Home() {
 
                 {/* Module 1: Profitability (NIM & YOEA) */}
                 <section>
-                  <h3 style={{ fontSize: '1.6rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}><Wallet color="var(--accent-color)" /> Profitability (Hiệu quả sinh lời)</h3>
+                  <h3 style={{ fontSize: '1.6rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}><Wallet color="var(--accent-color)" /> Profitability</h3>
                   
                   {selectedIndustry === "Banks" && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px', marginBottom: '32px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
                       <div className="card">
                       <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>Net Interest Margin (NIM) % - {sectorOverview.periods[activePeriodIndex]}</h4>
                       <div style={{ width: '100%', height: 300 }}>
@@ -1091,7 +1100,7 @@ export default function Home() {
                   )}
 
                   {/* Row 2: ROA & ROE */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                     <div className="card">
                       <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>Return on Assets (ROA) % - {sectorOverview.periods[activePeriodIndex]}</h4>
                       <div style={{ width: '100%', height: 300 }}>
@@ -1127,10 +1136,10 @@ export default function Home() {
                 {/* Module 2: CASA & COF */}
                 {selectedIndustry === "Banks" && (
                 <section>
-                  <h3 style={{ fontSize: '1.6rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}><PieChartIcon color="#9b59b6" /> Funding & Costs (Nguồn vốn & Chi phí)</h3>
+                  <h3 style={{ fontSize: '1.6rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}><PieChartIcon color="#9b59b6" /> Funding & Costs</h3>
                   
                   {/* CASA & COF Group */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px', marginBottom: '32px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
                     <div className="card">
                       <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>CASA Trend (%)</h4>
                       <div style={{ width: '100%', height: 300 }}>
@@ -1175,7 +1184,7 @@ export default function Home() {
                 <section>
                   <h3 style={{ fontSize: '1.6rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}><Activity color="#f39c12" /> Credit & Deposit Growth</h3>
                   
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px', marginBottom: '32px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
                     <div className="card">
                       <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>Deposit Growth (%YoY)</h4>
                       <div style={{ width: '100%', height: 300 }}>
@@ -1218,8 +1227,8 @@ export default function Home() {
                 {/* Module 2: Asset Quality & Liquidity */}
                 {selectedIndustry === "Banks" && (
                 <section>
-                  <h3 style={{ fontSize: '1.6rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}><Flame color="#e74c3c" /> Asset Quality & Liquidity (Chất lượng tài sản)</h3>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px', marginBottom: '32px' }}>
+                  <h3 style={{ fontSize: '1.6rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}><Flame color="#e74c3c" /> Asset Quality & Liquidity</h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
                     <div className="card">
                       <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>Non-Performing Loan (NPL) % - {sectorOverview.periods[activePeriodIndex]}</h4>
                       <div style={{ width: '100%', height: 300 }}>
@@ -1261,7 +1270,7 @@ export default function Home() {
                 {selectedIndustry === "Banks" && (
                 <section>
                   <h3 style={{ fontSize: '1.6rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}><ShieldCheck color="#2ecc71" /> Solvency & Liquidity</h3>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                     <div className="card">
                       <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>Capital Adequacy Ratio (CAR) % - {sectorOverview.periods[activePeriodIndex]}</h4>
                       <div style={{ width: '100%', height: 350 }}>
@@ -1304,19 +1313,19 @@ export default function Home() {
 
             {/* STATE 2: DEEP DIVE DASHBOARD (COMPANY PROFILE) */}
             {sectorOverview && selectedTickers.length === 1 && (
-              <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '48px' }}>
+              <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
 
                 {/* Dòng -1: Stock Valuation (P/E, P/B) */}
                 {(valuation || valuationLoading) && (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '20px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px' }}>
                     {/* Price */}
                     <div className="card" style={{ padding: '20px', background: 'linear-gradient(135deg, rgba(74,134,232,0.15) 0%, rgba(74,134,232,0.05) 100%)', border: '1px solid rgba(74,134,232,0.3)', position: 'relative', overflow: 'hidden' }}>
                       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: 'linear-gradient(90deg, #4a86e8, #9b59b6)' }} />
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>Giá hiện tại</div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>Current Price</div>
                       <div style={{ fontSize: '1.7rem', fontWeight: 800, color: '#4a86e8', letterSpacing: '-0.02em' }}>
-                        {valuationLoading ? '...' : valuation?.price ? new Intl.NumberFormat('vi-VN').format(valuation.price) : 'N/A'}
+                        {valuationLoading ? '...' : valuation?.price ? new Intl.NumberFormat('en-US').format(valuation.price) : 'N/A'}
                       </div>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>VNĐ / cổ phiếu</div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>VND / share</div>
                     </div>
 
                     {/* EPS */}
@@ -1324,9 +1333,9 @@ export default function Home() {
                       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: 'linear-gradient(90deg, #1abc9c, #2ecc71)' }} />
                       <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>EPS</div>
                       <div style={{ fontSize: '1.7rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
-                        {valuationLoading ? '...' : valuation?.eps ? new Intl.NumberFormat('vi-VN').format(Math.round(valuation.eps)) : 'N/A'}
+                        {valuationLoading ? '...' : valuation?.eps ? new Intl.NumberFormat('en-US').format(Math.round(valuation.eps)) : 'N/A'}
                       </div>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>VNĐ / cổ phiếu ({valuation?.eps_label || valuation?.period})</div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>VND / share ({valuation?.eps_label || valuation?.period})</div>
                     </div>
 
                     {/* P/E */}
@@ -1344,9 +1353,9 @@ export default function Home() {
                       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: 'linear-gradient(90deg, #9b59b6, #8e44ad)' }} />
                       <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>BVPS</div>
                       <div style={{ fontSize: '1.7rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
-                        {valuationLoading ? '...' : valuation?.bvps ? new Intl.NumberFormat('vi-VN').format(Math.round(valuation.bvps)) : 'N/A'}
+                        {valuationLoading ? '...' : valuation?.bvps ? new Intl.NumberFormat('en-US').format(Math.round(valuation.bvps)) : 'N/A'}
                       </div>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>VNĐ / cổ phiếu ({valuation?.period})</div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>VND / share ({valuation?.period})</div>
                     </div>
 
                     {/* P/B */}
@@ -1362,7 +1371,7 @@ export default function Home() {
                 )}
 
                 {/* Dòng 0: Top KPIs */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '32px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
 
                   {topKPIs.map((kpi, idx) => (
                     <div key={idx} className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -1406,8 +1415,8 @@ export default function Home() {
                   ))}
                 </div>
 
-                {/* Dòng 1: Waterfall */}
-                <div className="card" style={{ marginBottom: '32px' }}>
+                {/* Row 1: Waterfall */}
+                <div className="card" style={{ marginBottom: '16px' }}>
                   <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <TrendingUp color="var(--accent-color)" /> Earnings Waterfall ({sectorOverview.periods[activePeriodIndex]})
                   </h3>
@@ -1429,8 +1438,8 @@ export default function Home() {
                 </div>
 
 
-                {/* Dòng 2: NIM Trend & NPL/LLR Trend */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px' }}>
+                {/* Row 2: NIM Trend & NPL/LLR Trend */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   <div className="card">
                     <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <Wallet color="#3498db" /> NIM Trend (Profitability)
@@ -1472,24 +1481,26 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Dòng 2.8: LDR & SML (Liquidity Risk & Policy Limits) */}
+                {/* Row 2.8: LDR & SML (Liquidity Risk & Policy Limits) */}
                 {selectedIndustry === "Banks" && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px', marginBottom: '32px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
                     <div className="card">
                       <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <Activity color="#3498db" /> Loan to Deposit Ratio (LDR) Trend
+                        <Activity color="#3498db" /> Loan to Deposit Ratio (LDR) & Cost of Funds (COF) Trend
                       </h3>
                       <div style={{ width: '100%', height: 300 }}>
                         <ResponsiveContainer>
-                          <LineChart data={ldrSmlTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                          <ComposedChart data={ldrSmlTrendData} margin={{ top: 20, right: 20, bottom: 5, left: 20 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
                             <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
-                            <YAxis tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dx={-10} domain={['auto', 'auto']} />
+                            <YAxis yAxisId="left" tickFormatter={(v) => v + '%'} tick={{ fill: '#3498db' }} axisLine={false} tickLine={false} dx={-10} domain={['auto', 'auto']} />
+                            <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v + '%'} tick={{ fill: '#f39c12' }} axisLine={false} tickLine={false} dx={10} domain={[0, 'auto']} />
                             <Tooltip content={<CustomTooltip />} />
                             <Legend />
-                            <Line type="monotone" dataKey="LDR" name="LDR (%)" stroke="#3498db" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                            <ReferenceLine y={85} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ position: 'top', value: 'NHNN Limit (85%)', fill: '#e74c3c', fontSize: 11, fontWeight: 600 }} />
-                          </LineChart>
+                            <Bar yAxisId="left" dataKey="LDR" name="LDR (%)" fill="#3498db" radius={[4, 4, 0, 0]} barSize={32} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                            <Line yAxisId="right" type="monotone" dataKey="COF" name="COF (%)" stroke="#f39c12" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                            <ReferenceLine yAxisId="left" y={85} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ position: 'top', value: 'NHNN Limit (85%)', fill: '#e74c3c', fontSize: 11, fontWeight: 600 }} />
+                          </ComposedChart>
                         </ResponsiveContainer>
                       </div>
                     </div>
@@ -1500,23 +1511,77 @@ export default function Home() {
                       </h3>
                       <div style={{ width: '100%', height: 300 }}>
                         <ResponsiveContainer>
-                          <LineChart data={ldrSmlTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                          <AreaChart data={ldrSmlTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                            <defs>
+                              <linearGradient id="colorSml" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#2ecc71" stopOpacity={0.4}/>
+                                <stop offset="95%" stopColor="#2ecc71" stopOpacity={0.0}/>
+                              </linearGradient>
+                            </defs>
                             <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
                             <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
                             <YAxis tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dx={-10} domain={[0, 'dataMax + 10']} />
                             <Tooltip content={<CustomTooltip />} />
                             <Legend />
-                            <Line type="monotone" dataKey="SML" name="SML (%)" stroke="#2ecc71" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                            <Area type="monotone" dataKey="SML" name="SML (%)" stroke="#2ecc71" strokeWidth={3} fillOpacity={1} fill="url(#colorSml)" isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
                             <ReferenceLine y={30} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ position: 'top', value: 'NHNN Limit (<= 30%)', fill: '#e74c3c', fontSize: 11, fontWeight: 600 }} />
-                          </LineChart>
+                          </AreaChart>
                         </ResponsiveContainer>
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* Dòng 2.5: ROE vs ROA Trend & CAR Widget */}
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '32px' }}>
+                {/* Row 2.7: Funding & Growth */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div className="card">
+                    <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <PieChartIcon color="#9b59b6" /> Funding & Costs (YOEA vs COF)
+                    </h3>
+                    <div style={{ width: '100%', height: 300 }}>
+                      <ResponsiveContainer>
+                        <ComposedChart data={yoeaCofSpreadData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                          <defs>
+                            <linearGradient id="colorSpread" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#3498db" stopOpacity={0.25}/>
+                              <stop offset="95%" stopColor="#3498db" stopOpacity={0.05}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                          <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
+                          <YAxis tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
+                          <Tooltip content={<CustomTooltip />} />
+                          <Legend />
+                          <Area type="monotone" dataKey="spread" name="Spread" stroke="none" fill="url(#colorSpread)" isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                          <Line type="monotone" dataKey="YOEA" name="YOEA (%)" stroke="#3498db" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                          <Line type="monotone" dataKey="COF" name="COF (%)" stroke="#e74c3c" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  <div className="card">
+                    <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <TrendingUp color="#1abc9c" /> Growth (Credit vs Deposits)
+                    </h3>
+                    <div style={{ width: '100%', height: 300 }}>
+                      <ResponsiveContainer>
+                        <LineChart data={growthTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                          <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
+                          <YAxis tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
+                          <Tooltip content={<CustomTooltip />} />
+                          <Legend />
+                          <Line type="monotone" dataKey="CreditGrowth" name="Credit Growth (%)" stroke="#1abc9c" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                          <Line type="monotone" dataKey="DepositGrowth" name="Deposit Growth (%)" stroke="#f39c12" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Row 2.5: ROE vs ROA Trend & CAR Widget */}
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px' }}>
                   <div className="card">
                     <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <TrendingUp color="#9b59b6" /> ROA & ROE Trend (Profitability)
@@ -1559,50 +1624,9 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Dòng 2.7: Funding & Growth */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px' }}>
-                  <div className="card">
-                    <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <PieChartIcon color="#9b59b6" /> Funding & Costs (YOEA vs COF)
-                    </h3>
-                    <div style={{ width: '100%', height: 300 }}>
-                      <ResponsiveContainer>
-                        <LineChart data={yoeaCofTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
-                          <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
-                          <YAxis tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
-                          <Tooltip content={<CustomTooltip />} />
-                          <Legend />
-                          <Line type="monotone" dataKey="YOEA" name="YOEA (%)" stroke="#3498db" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                          <Line type="monotone" dataKey="COF" name="COF (%)" stroke="#e74c3c" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
 
-                  <div className="card">
-                    <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <TrendingUp color="#1abc9c" /> Growth (Credit vs Deposits)
-                    </h3>
-                    <div style={{ width: '100%', height: 300 }}>
-                      <ResponsiveContainer>
-                        <LineChart data={growthTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
-                          <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
-                          <YAxis tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
-                          <Tooltip content={<CustomTooltip />} />
-                          <Legend />
-                          <Line type="monotone" dataKey="CreditGrowth" name="Credit Growth (%)" stroke="#1abc9c" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                          <Line type="monotone" dataKey="DepositGrowth" name="Deposit Growth (%)" stroke="#f39c12" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                </div>
-
-
-                {/* Dòng 3: Balance Sheet */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px' }}>
+                {/* Row 3: Balance Sheet */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   <div className="card">
                     <h3 style={{ fontSize: '1.2rem', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <PieChartIcon color="var(--accent-color)" size={20} />

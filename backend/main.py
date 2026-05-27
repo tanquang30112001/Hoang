@@ -367,8 +367,6 @@ def get_sector_overview(user_id: str, sector: str, report_type: str = "Yearly", 
         return (0, 0)
 
     sorted_periods = sorted(list(all_periods_set), key=period_sort_key)
-    if len(sorted_periods) > last_periods:
-        sorted_periods = sorted_periods[-last_periods:]
     
     metrics_response = {
         "NII": [], "Net Profit": [], "LDR": [], "CASA": [], "COF": [], "YOEA": [],
@@ -402,19 +400,34 @@ def get_sector_overview(user_id: str, sector: str, report_type: str = "Yearly", 
             
             loans = pd_vals.get("Loans", 0)
             deposits = pd_vals.get("Deposits", 0)
-            
-            # For YoY Credit Growth, we compare to t-1 for Yearly, t-4 for Quarterly
-            if report_type == "Quarterly" and idx >= 4:
-                prev_yr_p = sorted_periods[idx - 4]
-                prev_yr_vals = t_data.get(prev_yr_p, {})
-                prev_yr_loans = prev_yr_vals.get("Loans", loans)
-                credit_growth = round((loans - prev_yr_loans) / prev_yr_loans * 100, 2) if prev_yr_loans > 0 else 0
-            else:
-                prev_loans = prev_vals.get("Loans", loans)
-                credit_growth = round((loans - prev_loans) / prev_loans * 100, 2) if prev_loans > 0 else 0
-                
+            prev_loans = prev_vals.get("Loans", loans)
             prev_deposits = prev_vals.get("Deposits", deposits)
-            deposit_growth = round((deposits - prev_deposits) / prev_deposits * 100, 2) if prev_deposits > 0 else 0
+            
+            # For YoY Credit & Deposit Growth, we compare to t-1 for Yearly, t-4 for Quarterly. Never fallback to QoQ.
+            if report_type == "Quarterly":
+                if idx >= 4:
+                    prev_yr_p = sorted_periods[idx - 4]
+                    prev_yr_vals = t_data.get(prev_yr_p, {})
+                    prev_yr_loans = prev_yr_vals.get("Loans", 0)
+                    credit_growth = round((loans - prev_yr_loans) / prev_yr_loans * 100, 2) if prev_yr_loans > 0 else 0
+                    
+                    prev_yr_deposits = prev_yr_vals.get("Deposits", 0)
+                    deposit_growth = round((deposits - prev_yr_deposits) / prev_yr_deposits * 100, 2) if prev_yr_deposits > 0 else 0
+                else:
+                    credit_growth = 0
+                    deposit_growth = 0
+            else:
+                if idx >= 1:
+                    prev_yr_p = sorted_periods[idx - 1]
+                    prev_yr_vals = t_data.get(prev_yr_p, {})
+                    prev_yr_loans = prev_yr_vals.get("Loans", 0)
+                    credit_growth = round((loans - prev_yr_loans) / prev_yr_loans * 100, 2) if prev_yr_loans > 0 else 0
+                    
+                    prev_yr_deposits = prev_yr_vals.get("Deposits", 0)
+                    deposit_growth = round((deposits - prev_yr_deposits) / prev_yr_deposits * 100, 2) if prev_yr_deposits > 0 else 0
+                else:
+                    credit_growth = 0
+                    deposit_growth = 0
             
             arrs["Gross Loans"].append(loans)
             
@@ -567,11 +580,11 @@ def get_sector_overview(user_id: str, sector: str, report_type: str = "Yearly", 
                 arrs[m].append(pd_vals.get(m, 0))
             
         for k in metrics_response.keys():
-            metrics_response[k].append({"ticker": ticker, "data": arrs[k]})
+            metrics_response[k].append({"ticker": ticker, "data": arrs[k][-last_periods:]})
         
     return {
         "sector": sector,
-        "periods": sorted_periods,
+        "periods": sorted_periods[-last_periods:],
         "metrics": metrics_response
     }
 
