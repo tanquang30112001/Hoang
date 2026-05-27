@@ -881,7 +881,6 @@ export default function Home() {
                     onChange={(e) => setTimeRange(Number(e.target.value))}
                     style={{ padding: '10px 16px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-surface)', cursor: 'pointer', outline: 'none' }}
                   >
-                    <option value={4}>4 Periods</option>
                     <option value={6}>6 Periods</option>
                     <option value={8}>8 Periods</option>
                     <option value={12}>12 Periods</option>
