@@ -1,0 +1,213 @@
+:root {
+  --bg-main: #fcfbf9;
+  --bg-surface: #ffffff;
+  --text-primary: #2d2a26;
+  --text-secondary: #7a756f;
+  --accent-color: #c9b090;
+  --accent-hover: #b39b7d;
+  --border-color: #eae5de;
+  --shadow-sm: 0 4px 12px rgba(45, 42, 38, 0.03);
+  --shadow-md: 0 12px 32px rgba(45, 42, 38, 0.06);
+  --radius-lg: 20px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
+p {
+  margin: 0 0 1rem 0;
+}
+
+a {
+  color: var(--accent-color);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+a:hover {
+  color: var(--accent-hover);
+}
+
+.btn {
+  background-color: var(--accent-color);
+  color: #fff;
+  border: none;
+  padding: 12px 24px;
+  border-radius: var(--radius-md);
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn:hover:not(:disabled) {
+  background-color: var(--accent-hover);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(201, 176, 144, 0.3);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background-color: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.card {
+  background-color: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 32px;
+  border: 1px solid var(--border-color);
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
+}
+
+.card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease forwards;
+}
+
+/* Print styles for exporting dashboard/charts to PDF */
+@media print {
+  :root {
+    --bg-main: #ffffff !important;
+    --bg-surface: #ffffff !important;
+    --text-primary: #000000 !important;
+    --text-secondary: #444444 !important;
+    --border-color: #cccccc !important;
+  }
+
+  .no-print,
+  aside,
+  button,
+  select,
+  input,
+  .btn,
+  .toast,
+  [role="button"] {
+    display: none !important;
+  }
+
+  body, html {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    flex: 1 !important;
+    overflow: visible !important;
+    display: block !important;
+  }
+
+  /* Force grids to display side-by-side on print */
+  div[style*="grid-template-columns: 1fr 1fr"],
+  div[style*="grid-template-columns: 2fr 1fr"] {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 20px !important;
+  }
+
+  div[style*="grid-template-columns: 2fr 1fr"] {
+    grid-template-columns: 2fr 1fr !important;
+  }
+
+  /* Keep top KPIs as a 3-column grid */
+  div[style*="grid-template-columns: 1fr 1fr 1fr"] {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr 1fr !important;
+    gap: 16px !important;
+  }
+
+  /* Specify fixed widths on print to prevent Recharts calculations from collapsing */
+  div[style*="grid-template-columns: 1fr 1fr"] > .card {
+    width: 350px !important;
+    min-width: 350px !important;
+  }
+
+  div[style*="grid-template-columns: 2fr 1fr"] > .card:first-child {
+    width: 480px !important;
+    min-width: 480px !important;
+  }
+
+  div[style*="grid-template-columns: 2fr 1fr"] > .card:last-child {
+    width: 240px !important;
+    min-width: 240px !important;
+  }
+
+  /* Force print background graphics */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .card, section {
+    page-break-inside: avoid;
+    break-inside: avoid;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    border: 1px solid #eae5de !important;
+    margin-bottom: 24px !important;
+  }
+
+  /* Prevent Recharts elements from collapsing and enforce stable dimensions */
+  .recharts-responsive-container {
+    width: 100% !important;
+    min-width: 100% !important;
+    height: 300px !important;
+    min-height: 300px !important;
+  }
+}
+
