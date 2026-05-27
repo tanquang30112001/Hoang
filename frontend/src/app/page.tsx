@@ -14,7 +14,7 @@ const USER_ID = "059a4524-555c-491a-8c8a-dc9618f8d788";
 const cacheSet = (key: string, data: any) => {
   try { localStorage.setItem(`findata_cache_${key}`, JSON.stringify(data)); } catch {}
 };
-const cacheGet = <T>(key: string): T | null => {
+const cacheGet = <T,>(key: string): T | null => {
   try {
     const raw = localStorage.getItem(`findata_cache_${key}`);
     return raw ? (JSON.parse(raw) as T) : null;
