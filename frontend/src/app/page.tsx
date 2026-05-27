@@ -1438,8 +1438,8 @@ export default function Home() {
                 </div>
 
 
-                {/* Row 2: NIM Trend & NPL/LLR Trend */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                {/* Row 2: NIM Trend & Funding & Costs (YOEA vs COF) */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
                   <div className="card">
                     <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <Wallet color="#3498db" /> NIM Trend (Profitability)
@@ -1460,80 +1460,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <div className="card">
-                    <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <Flame color="#e74c3c" /> NPL vs LLR (Asset Quality)
-                    </h3>
-                    <div style={{ width: '100%', height: 300 }}>
-                      <ResponsiveContainer>
-                        <LineChart data={assetQualityTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
-                          <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
-                          <YAxis yAxisId="left" tickFormatter={(v) => v + '%'} tick={{ fill: '#e74c3c' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
-                          <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v + '%'} tick={{ fill: '#2ecc71' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
-                          <Tooltip content={<CustomTooltip />} />
-                          <Legend />
-                          <Line yAxisId="left" type="monotone" dataKey="NPL" name="NPL (%)" stroke="#e74c3c" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                          <Line yAxisId="right" type="monotone" dataKey="LLR" name="LLR Coverage (%)" stroke="#2ecc71" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} strokeDasharray="5 5" isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Row 2.8: LDR & SML (Liquidity Risk & Policy Limits) */}
-                {selectedIndustry === "Banks" && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-                    <div className="card">
-                      <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <Activity color="#3498db" /> Loan to Deposit Ratio (LDR) & Cost of Funds (COF) Trend
-                      </h3>
-                      <div style={{ width: '100%', height: 300 }}>
-                        <ResponsiveContainer>
-                          <ComposedChart data={ldrSmlTrendData} margin={{ top: 20, right: 20, bottom: 5, left: 20 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
-                            <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
-                            <YAxis yAxisId="left" tickFormatter={(v) => v + '%'} tick={{ fill: '#3498db' }} axisLine={false} tickLine={false} dx={-10} domain={['auto', 'auto']} />
-                            <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v + '%'} tick={{ fill: '#f39c12' }} axisLine={false} tickLine={false} dx={10} domain={[0, 'auto']} />
-                            <Tooltip content={<CustomTooltip />} />
-                            <Legend />
-                            <Bar yAxisId="left" dataKey="LDR" name="LDR (%)" fill="#3498db" radius={[4, 4, 0, 0]} barSize={32} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                            <Line yAxisId="right" type="monotone" dataKey="COF" name="COF (%)" stroke="#f39c12" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                            <ReferenceLine yAxisId="left" y={85} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ position: 'top', value: 'NHNN Limit (85%)', fill: '#e74c3c', fontSize: 11, fontWeight: 600 }} />
-                          </ComposedChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-
-                    <div className="card">
-                      <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <ShieldCheck color="#2ecc71" /> Short-term Funds for Med/Long-term Loans (SML)
-                      </h3>
-                      <div style={{ width: '100%', height: 300 }}>
-                        <ResponsiveContainer>
-                          <AreaChart data={ldrSmlTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                            <defs>
-                              <linearGradient id="colorSml" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#2ecc71" stopOpacity={0.4}/>
-                                <stop offset="95%" stopColor="#2ecc71" stopOpacity={0.0}/>
-                              </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
-                            <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
-                            <YAxis tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dx={-10} domain={[0, 'dataMax + 10']} />
-                            <Tooltip content={<CustomTooltip />} />
-                            <Legend />
-                            <Area type="monotone" dataKey="SML" name="SML (%)" stroke="#2ecc71" strokeWidth={3} fillOpacity={1} fill="url(#colorSml)" isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                            <ReferenceLine y={30} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ position: 'top', value: 'NHNN Limit (<= 30%)', fill: '#e74c3c', fontSize: 11, fontWeight: 600 }} />
-                          </AreaChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Row 2.7: Funding & Growth */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   <div className="card">
                     <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <PieChartIcon color="#9b59b6" /> Funding & Costs (YOEA vs COF)
@@ -1559,6 +1485,32 @@ export default function Home() {
                       </ResponsiveContainer>
                     </div>
                   </div>
+                </div>
+
+                {/* Row 2.1: LDR & Growth (Credit vs Deposits) */}
+                <div style={{ display: 'grid', gridTemplateColumns: selectedIndustry === "Banks" ? '1fr 1fr' : '1fr', gap: '16px', marginBottom: '16px' }}>
+                  {selectedIndustry === "Banks" && (
+                    <div className="card">
+                      <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <Activity color="#3498db" /> Loan to Deposit Ratio (LDR) & Cost of Funds (COF) Trend
+                      </h3>
+                      <div style={{ width: '100%', height: 300 }}>
+                        <ResponsiveContainer>
+                          <ComposedChart data={ldrSmlTrendData} margin={{ top: 20, right: 20, bottom: 5, left: 20 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                            <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
+                            <YAxis yAxisId="left" tickFormatter={(v) => v + '%'} tick={{ fill: '#3498db' }} axisLine={false} tickLine={false} dx={-10} domain={['auto', 'auto']} />
+                            <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v + '%'} tick={{ fill: '#f39c12' }} axisLine={false} tickLine={false} dx={10} domain={[0, 'auto']} />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Legend />
+                            <Bar yAxisId="left" dataKey="LDR" name="LDR (%)" fill="#3498db" radius={[4, 4, 0, 0]} barSize={32} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                            <Line yAxisId="right" type="monotone" dataKey="COF" name="COF (%)" stroke="#f39c12" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                            <ReferenceLine yAxisId="left" y={85} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ position: 'top', value: 'NHNN Limit (85%)', fill: '#e74c3c', fontSize: 11, fontWeight: 600 }} />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="card">
                     <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -1580,8 +1532,58 @@ export default function Home() {
                   </div>
                 </div>
 
+                {/* Row 2.2: NPL & LLR vs SML (Asset Quality & Liquidity Risk) */}
+                <div style={{ display: 'grid', gridTemplateColumns: selectedIndustry === "Banks" ? '1fr 1fr' : '1fr', gap: '16px', marginBottom: '16px' }}>
+                  <div className="card">
+                    <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <Flame color="#e74c3c" /> NPL vs LLR (Asset Quality)
+                    </h3>
+                    <div style={{ width: '100%', height: 300 }}>
+                      <ResponsiveContainer>
+                        <LineChart data={assetQualityTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                          <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
+                          <YAxis yAxisId="left" tickFormatter={(v) => v + '%'} tick={{ fill: '#e74c3c' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
+                          <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v + '%'} tick={{ fill: '#2ecc71' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
+                          <Tooltip content={<CustomTooltip />} />
+                          <Legend />
+                          <Line yAxisId="left" type="monotone" dataKey="NPL" name="NPL (%)" stroke="#e74c3c" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                          <Line yAxisId="right" type="monotone" dataKey="LLR" name="LLR Coverage (%)" stroke="#2ecc71" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} strokeDasharray="5 5" isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {selectedIndustry === "Banks" && (
+                    <div className="card">
+                      <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <ShieldCheck color="#2ecc71" /> Short-term Funds for Med/Long-term Loans (SML)
+                      </h3>
+                      <div style={{ width: '100%', height: 300 }}>
+                        <ResponsiveContainer>
+                          <AreaChart data={ldrSmlTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                            <defs>
+                              <linearGradient id="colorSml" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#2ecc71" stopOpacity={0.4}/>
+                                <stop offset="95%" stopColor="#2ecc71" stopOpacity={0.0}/>
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                            <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
+                            <YAxis tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dx={-10} domain={[0, 'dataMax + 10']} />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Legend />
+                            <Area type="monotone" dataKey="SML" name="SML (%)" stroke="#2ecc71" strokeWidth={3} fillOpacity={1} fill="url(#colorSml)" isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                            <ReferenceLine y={30} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ position: 'top', value: 'NHNN Limit (<= 30%)', fill: '#e74c3c', fontSize: 11, fontWeight: 600 }} />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* Row 2.5: ROE vs ROA Trend & CAR Widget */}
-                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px', marginBottom: '16px' }}>
                   <div className="card">
                     <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
                       <TrendingUp color="#9b59b6" /> ROA & ROE Trend (Profitability)
