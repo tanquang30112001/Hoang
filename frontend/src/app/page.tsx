@@ -1,19 +1,22 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { UploadCloud, FileSpreadsheet, ChevronRight, BarChart3, AlertCircle, Building2, TrendingUp, TrendingDown, LogOut, Search, X, ChevronDown, Activity, PieChart as PieChartIcon, ShieldCheck, Wallet, Flame, Menu, ChevronLeft, Download, Printer, RefreshCw } from "lucide-react";
+import { UploadCloud, FileSpreadsheet, ChevronRight, BarChart3, AlertCircle, Building2, TrendingUp, TrendingDown, Search, X, ChevronDown, Activity, PieChart as PieChartIcon, ShieldCheck, Wallet, Flame, Menu, ChevronLeft, Download, Printer, RefreshCw } from "lucide-react";
+
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, PieChart, Pie, Sector, ComposedChart, ReferenceLine, ScatterChart, Scatter, ZAxis, LabelList, AreaChart, Area } from 'recharts';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+// Fixed workspace user – no login required
+const USER_ID = "059a4524-555c-491a-8c8a-dc9618f8d788";
 
 const formatNumber = (num: number) => {
   return new Intl.NumberFormat('en-GB', { maximumFractionDigits: 2 }).format(num);
 };
 
 export default function Home() {
-  const [user, setUser] = useState<{user_id: string, username: string} | null>(null);
-  const [loginInput, setLoginInput] = useState("");
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
 
   const [filesToUpload, setFilesToUpload] = useState<{ file: File; status: 'pending' | 'uploading' | 'success' | 'error'; errorMsg?: string }[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -43,46 +46,43 @@ export default function Home() {
   const [lastRefreshTime, setLastRefreshTime] = useState<string>("");
 
   useEffect(() => {
-    const savedUser = localStorage.getItem("findata_user");
-    if (savedUser) {
-      const parsed = JSON.parse(savedUser);
-      setUser(parsed);
-      loadDashboard(parsed.user_id);
-    }
-    
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setShowDropdown(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
+    // Load dashboard on mount
+    loadDashboard(USER_ID);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  useEffect(() => {
-    if (user) fetchIndustries(user.user_id);
-  }, [user]);
 
   useEffect(() => {
-    if (selectedIndustry && user) {
-      fetchStocks(user.user_id, selectedIndustry, reportType);
-      fetchSectorOverview(user.user_id, selectedIndustry, reportType, timeRange);
+    fetchIndustries(USER_ID);
+  }, []);
+
+  useEffect(() => {
+    if (selectedIndustry) {
+      fetchStocks(USER_ID, selectedIndustry, reportType);
+      fetchSectorOverview(USER_ID, selectedIndustry, reportType, timeRange);
     }
-  }, [selectedIndustry, user, reportType, timeRange]);
+  }, [selectedIndustry, reportType, timeRange]);
 
   useEffect(() => {
-    if (user && selectedIndustry) {
-      saveDashboard(user.user_id, selectedIndustry, reportType, selectedTickers);
+    if (selectedIndustry) {
+      saveDashboard(USER_ID, selectedIndustry, reportType, selectedTickers);
     }
   }, [selectedTickers, reportType, timeRange]);
 
+
   // Fetch valuation (P/E, P/B) whenever a single ticker is selected
   useEffect(() => {
-    if (selectedTickers.length === 1 && user) {
+    if (selectedTickers.length === 1) {
       const ticker = selectedTickers[0];
       setValuation(null);
       setValuationLoading(true);
-      fetch(`${API_BASE_URL}/api/stocks/${ticker}/valuation?user_id=${user.user_id}&report_type=${reportType}`)
+      fetch(`${API_BASE_URL}/api/stocks/${ticker}/valuation?user_id=${USER_ID}&report_type=${reportType}`)
         .then(r => r.json())
         .then(data => { 
           setValuation(data); 
@@ -93,12 +93,13 @@ export default function Home() {
     } else {
       setValuation(null);
     }
-  }, [selectedTickers, user, reportType, refreshTrigger]);
+  }, [selectedTickers, reportType, refreshTrigger]);
+
   
   useEffect(() => {
-    if (selectedIndustry && user) {
+    if (selectedIndustry) {
       setSectorValuationLoading(true);
-      fetch(`${API_BASE_URL}/api/sectors/${encodeURIComponent(selectedIndustry)}/valuation?user_id=${user.user_id}&report_type=${reportType}`)
+      fetch(`${API_BASE_URL}/api/sectors/${encodeURIComponent(selectedIndustry)}/valuation?user_id=${USER_ID}&report_type=${reportType}`)
         .then(r => r.json())
         .then(data => {
           setSectorValuation(data.valuation || []);
@@ -107,7 +108,8 @@ export default function Home() {
         })
         .catch(() => setSectorValuationLoading(false));
     }
-  }, [selectedIndustry, user, reportType, refreshTrigger]);
+  }, [selectedIndustry, reportType, refreshTrigger]);
+
 
   // Live data auto-refresh interval effect
   useEffect(() => {
@@ -147,30 +149,6 @@ export default function Home() {
     }
   };
 
-  const handleLogin = async () => {
-    if (!loginInput) return;
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: loginInput })
-      });
-      const data = await res.json();
-      setUser(data);
-      localStorage.setItem("findata_user", JSON.stringify(data));
-      loadDashboard(data.user_id);
-    } catch (e) {
-      alert("Login failed");
-    }
-  };
-
-  const handleLogout = () => {
-    setUser(null);
-    setSelectedIndustry(null);
-    setSelectedTickers([]);
-    setSectorOverview(null);
-    localStorage.removeItem("findata_user");
-  };
 
   const fetchIndustries = async (userId: string) => {
     try {
@@ -201,6 +179,7 @@ export default function Home() {
       console.error(e);
     }
   };
+
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -776,19 +755,6 @@ export default function Home() {
     );
   };
 
-  if (!user) {
-    return (
-      <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: 'var(--bg-main)', alignItems: 'center', justifyContent: 'center' }}>
-        <div className="card animate-fade-in" style={{ width: '400px', textAlign: 'center' }}>
-          <BarChart3 size={48} color="var(--accent-color)" style={{ marginBottom: '24px' }} />
-          <h2 style={{ marginBottom: '8px' }}>Welcome to FinData</h2>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: '32px' }}>Please enter your workspace name to continue.</p>
-          <input type="text" placeholder="Username (e.g. david)" value={loginInput} onChange={(e) => setLoginInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleLogin()} style={{ width: '100%', padding: '16px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)', marginBottom: '24px', fontSize: '1rem' }} />
-          <button className="btn" onClick={handleLogin} style={{ width: '100%', padding: '16px' }}>Access Workspace</button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: 'var(--bg-main)' }}>
@@ -852,11 +818,9 @@ export default function Home() {
               </ul>
             )}
           </div>
-          <div style={{ marginTop: 'auto', paddingTop: '24px', borderTop: '1px solid var(--border-color)' }}>
-             <button className="btn btn-secondary" style={{ width: '100%' }} onClick={handleLogout}><LogOut size={18} />Logout ({user.username})</button>
-          </div>
         </div>
       </aside>
+
 
       {/* Main Content */}
       <main style={{ flex: 1, padding: '40px 60px', overflowY: 'auto', overflowX: 'hidden' }}>
