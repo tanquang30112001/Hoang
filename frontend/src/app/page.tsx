@@ -197,7 +197,8 @@ export default function Home() {
       setFilesToUpload(targets);
     }
     
-    if (targets.length === 0 || !user) return;
+    if (targets.length === 0) return;
+
     
     setUploading(true);
     setError(null);
