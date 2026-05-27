@@ -212,7 +212,7 @@ export default function Home() {
       const targetFile = targets[i].file;
       const formData = new FormData();
       formData.append("file", targetFile);
-      formData.append("user_id", user.user_id);
+      formData.append("user_id", USER_ID);
       
       try {
         const response = await fetch(`${API_BASE_URL}/api/upload`, {
@@ -234,7 +234,7 @@ export default function Home() {
     
     if (successCount > 0) {
       setSuccessMsg(`Successfully imported ${successCount} file(s) securely.`);
-      fetchIndustries(user.user_id);
+      fetchIndustries(USER_ID);
     }
     if (failCount > 0) {
       setError(`Failed to import ${failCount} file(s). Please review the errors below.`);
