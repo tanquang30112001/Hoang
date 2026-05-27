@@ -37,6 +37,10 @@ export default function Home() {
   const [searchTerm, setSearchTerm] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  
+  const [refreshInterval, setRefreshInterval] = useState<number | null>(60);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [lastRefreshTime, setLastRefreshTime] = useState<string>("");
 
   useEffect(() => {
     const savedUser = localStorage.getItem("findata_user");
@@ -80,12 +84,16 @@ export default function Home() {
       setValuationLoading(true);
       fetch(`${API_BASE_URL}/api/stocks/${ticker}/valuation?user_id=${user.user_id}&report_type=${reportType}`)
         .then(r => r.json())
-        .then(data => { setValuation(data); setValuationLoading(false); })
+        .then(data => { 
+          setValuation(data); 
+          setValuationLoading(false); 
+          setLastRefreshTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        })
         .catch(() => setValuationLoading(false));
     } else {
       setValuation(null);
     }
-  }, [selectedTickers, user, reportType]);
+  }, [selectedTickers, user, reportType, refreshTrigger]);
   
   useEffect(() => {
     if (selectedIndustry && user) {
@@ -95,10 +103,21 @@ export default function Home() {
         .then(data => {
           setSectorValuation(data.valuation || []);
           setSectorValuationLoading(false);
+          setLastRefreshTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
         })
         .catch(() => setSectorValuationLoading(false));
     }
-  }, [selectedIndustry, user, reportType]);
+  }, [selectedIndustry, user, reportType, refreshTrigger]);
+
+  // Live data auto-refresh interval effect
+  useEffect(() => {
+    if (!refreshInterval) return;
+    const intervalMs = refreshInterval * 60 * 1000;
+    const intervalId = setInterval(() => {
+      setRefreshTrigger(prev => prev + 1);
+    }, intervalMs);
+    return () => clearInterval(intervalId);
+  }, [refreshInterval]);
 
   const loadDashboard = async (userId: string) => {
     try {
@@ -972,6 +991,46 @@ export default function Home() {
                 <p style={{ color: 'var(--text-secondary)', fontSize: '1.1rem', margin: 0 }}>
                   {selectedTickers.length === 0 ? "Peer Comparison Dashboard" : `Deep Dive: ${selectedTickers[0]} Company Profile`}
                 </p>
+                
+                {/* Auto Refresh Control */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  {lastRefreshTime && (
+                    <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      Refreshed at: <strong style={{ color: 'var(--text-primary)' }}>{lastRefreshTime}</strong>
+                    </span>
+                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Activity size={14} className={refreshInterval ? "animate-pulse" : ""} style={{ color: refreshInterval ? '#2ecc71' : 'var(--text-secondary)' }} />
+                      Auto-Refresh:
+                    </span>
+                    <select 
+                      value={refreshInterval === null ? 'off' : refreshInterval} 
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setRefreshInterval(val === 'off' ? null : Number(val));
+                      }}
+                      style={{ 
+                        padding: '6px 12px', 
+                        borderRadius: '8px', 
+                        border: '1px solid var(--border-color)', 
+                        backgroundColor: 'var(--bg-surface)', 
+                        color: 'var(--text-primary)', 
+                        fontSize: '0.85rem', 
+                        fontWeight: 500, 
+                        outline: 'none', 
+                        cursor: 'pointer',
+                        transition: 'border-color 0.2s ease'
+                      }}
+                    >
+                      <option value="30">30m</option>
+                      <option value="60">1h</option>
+                      <option value="120">2h</option>
+                      <option value="180">3h</option>
+                      <option value="off">Off</option>
+                    </select>
+                  </div>
+                </div>
               </div>
             </header>
 
