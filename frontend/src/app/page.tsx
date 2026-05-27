@@ -15,7 +15,7 @@ export default function Home() {
   const [loginInput, setLoginInput] = useState("");
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-  const [file, setFile] = useState<File | null>(null);
+  const [filesToUpload, setFilesToUpload] = useState<{ file: File; status: 'pending' | 'uploading' | 'success' | 'error'; errorMsg?: string }[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -185,37 +185,63 @@ export default function Home() {
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      setFile(e.target.files[0]);
+      const selectedFiles = Array.from(e.target.files);
+      setFilesToUpload(selectedFiles.map(f => ({ file: f, status: 'pending' })));
       setError(null);
       setSuccessMsg(null);
     }
   };
 
-  const handleUpload = async (fileToUpload?: File) => {
-    const targetFile = fileToUpload || file;
-    if (!targetFile || !user) return;
+  const handleUpload = async (filesFromSidebar?: FileList | null) => {
+    let targets = filesToUpload;
+    if (filesFromSidebar && filesFromSidebar.length > 0) {
+      targets = Array.from(filesFromSidebar).map(f => ({ file: f, status: 'pending' }));
+      setFilesToUpload(targets);
+    }
+    
+    if (targets.length === 0 || !user) return;
+    
     setUploading(true);
     setError(null);
     setSuccessMsg(null);
-    
-    const formData = new FormData();
-    formData.append("file", targetFile);
-    formData.append("user_id", user.user_id);
 
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/upload`, {
-        method: "POST",
-        body: formData,
-      });
-      if (!response.ok) throw new Error("Failed to upload file.");
-      const data = await response.json();
-      setSuccessMsg(`Data for ${data.ticker} imported securely.`);
-      setFile(null);
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (let i = 0; i < targets.length; i++) {
+      setFilesToUpload(prev => prev.map((item, idx) => idx === i ? { ...item, status: 'uploading' } : item));
+      
+      const targetFile = targets[i].file;
+      const formData = new FormData();
+      formData.append("file", targetFile);
+      formData.append("user_id", user.user_id);
+      
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/upload`, {
+          method: "POST",
+          body: formData,
+        });
+        if (!response.ok) throw new Error("Failed to process Excel file.");
+        const data = await response.json();
+        
+        successCount++;
+        setFilesToUpload(prev => prev.map((item, idx) => idx === i ? { ...item, status: 'success' } : item));
+      } catch (err: any) {
+        failCount++;
+        setFilesToUpload(prev => prev.map((item, idx) => idx === i ? { ...item, status: 'error', errorMsg: err.message || "Failed" } : item));
+      }
+    }
+    
+    setUploading(false);
+    
+    if (successCount > 0) {
+      setSuccessMsg(`Successfully imported ${successCount} file(s) securely.`);
       fetchIndustries(user.user_id);
-    } catch (err: any) {
-      setError(err.message || "Connection error occurred");
-    } finally {
-      setUploading(false);
+    }
+    if (failCount > 0) {
+      setError(`Failed to import ${failCount} file(s). Please review the errors below.`);
+    } else {
+      setFilesToUpload([]);
     }
   };
 
@@ -590,6 +616,30 @@ export default function Home() {
     });
   }, [selectedTickers, sectorOverview]);
 
+  const ldrSmlTrendData = useMemo(() => {
+    if (selectedTickers.length !== 1 || !sectorOverview) return [];
+    const ticker = selectedTickers[0];
+    return sectorOverview.periods.map((p: string, pIdx: number) => {
+      const getVal = (metric: string) => {
+        const item = sectorOverview.metrics[metric]?.find((t: any) => t.ticker === ticker);
+        return item ? (item.data[pIdx] || 0) : 0;
+      };
+      
+      const ldr = getVal("LDR");
+      const mdhLoans = getVal("MediumTermLoans") + getVal("LongTermLoans");
+      const ltLiab = getVal("BL_TotalLiab_1_5Y") + getVal("BL_TotalLiab_Over5Y");
+      
+      const stUsedForMdh = Math.max(0, mdhLoans - ltLiab);
+      const sml = mdhLoans > 0 ? (stUsedForMdh / mdhLoans) * 100 : 0;
+      
+      return {
+        period: p,
+        LDR: ldr,
+        SML: parseFloat(sml.toFixed(2))
+      };
+    });
+  }, [selectedTickers, sectorOverview]);
+
   const carKPI = useMemo(() => {
     if (selectedTickers.length !== 1 || !sectorOverview) return { current: 0, change: 0, period: "" };
     const ticker = selectedTickers[0];
@@ -752,11 +802,9 @@ export default function Home() {
           </div>
           
           <button className="btn" style={{ width: '100%', marginBottom: '32px' }} onClick={() => document.getElementById('fileUploadSidebar')?.click()}><UploadCloud size={18} />Upload Data</button>
-          <input type="file" id="fileUploadSidebar" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={(e) => { 
+          <input type="file" id="fileUploadSidebar" accept=".xlsx,.xls" multiple style={{ display: 'none' }} onChange={(e) => { 
             if (e.target.files && e.target.files.length > 0) {
-              const f = e.target.files[0];
-              setFile(f);
-              handleUpload(f);
+              handleUpload(e.target.files);
             }
           }} />
 
@@ -791,12 +839,29 @@ export default function Home() {
               <UploadCloud size={64} color="var(--accent-color)" style={{ marginBottom: '24px' }} />
               <h2 style={{ marginBottom: '12px', fontSize: '1.8rem' }}>Upload Financial Statement</h2>
               <p style={{ color: 'var(--text-secondary)', fontSize: '1rem', marginBottom: '0' }}>Securely import Excel formats (.xlsx, .xls) to your workspace.</p>
-              <input type="file" id="fileUpload" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleFileChange} />
+              <input type="file" id="fileUpload" accept=".xlsx,.xls" multiple style={{ display: 'none' }} onChange={handleFileChange} />
             </div>
-            {file && <div style={{ display: 'flex', alignItems: 'center', gap: '16px', justifyContent: 'center', marginBottom: '32px', padding: '16px', backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)' }}><FileSpreadsheet size={28} color="var(--accent-color)" /><span style={{ fontWeight: 600, fontSize: '1.1rem' }}>{file.name}</span></div>}
+            {filesToUpload.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '24px', textAlign: 'left', maxHeight: '180px', overflowY: 'auto', padding: '12px', backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)' }}>
+                {filesToUpload.map((item, idx) => (
+                  <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: 'var(--bg-main)', borderRadius: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', flex: 1, marginRight: '12px' }}>
+                      <FileSpreadsheet size={16} color="var(--accent-color)" style={{ flexShrink: 0 }} />
+                      <span style={{ fontSize: '0.85rem', fontWeight: 500, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }} title={item.file.name}>{item.file.name}</span>
+                    </div>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 600, padding: '2px 8px', borderRadius: '4px', flexShrink: 0,
+                      backgroundColor: item.status === 'success' ? '#e6f4ea' : item.status === 'error' ? '#fce8e6' : item.status === 'uploading' ? '#fef7e0' : '#f1f3f4',
+                      color: item.status === 'success' ? '#137333' : item.status === 'error' ? '#c5221f' : item.status === 'uploading' ? '#b06000' : '#5f6368'
+                    }}>
+                      {item.status === 'success' ? 'Thành công' : item.status === 'error' ? 'Lỗi' : item.status === 'uploading' ? 'Đang tải...' : 'Chờ'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
             {error && <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center', color: '#e53e3e', marginBottom: '24px', padding: '12px', backgroundColor: '#fef2f2', borderRadius: 'var(--radius-sm)' }}><AlertCircle size={20} /><span>{error}</span></div>}
             {successMsg && <div style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center', color: '#38a169', marginBottom: '24px', padding: '12px', backgroundColor: '#f0fff4', borderRadius: 'var(--radius-sm)' }}><AlertCircle size={20} /><span>{successMsg}</span></div>}
-            <button className="btn" onClick={() => handleUpload()} disabled={!file || uploading} style={{ width: '100%', padding: '18px', fontSize: '1.1rem' }}>
+            <button className="btn" onClick={() => handleUpload()} disabled={filesToUpload.length === 0 || uploading} style={{ width: '100%', padding: '18px', fontSize: '1.1rem' }}>
               {uploading ? 'Processing Data...' : 'Start Secure Import'}
               {!uploading && <ChevronRight size={24} />}
             </button>
@@ -1407,6 +1472,49 @@ export default function Home() {
                   </div>
                 </div>
 
+                {/* Dòng 2.8: LDR & SML (Liquidity Risk & Policy Limits) */}
+                {selectedIndustry === "Banks" && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px', marginBottom: '32px' }}>
+                    <div className="card">
+                      <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <Activity color="#3498db" /> Loan to Deposit Ratio (LDR) Trend
+                      </h3>
+                      <div style={{ width: '100%', height: 300 }}>
+                        <ResponsiveContainer>
+                          <LineChart data={ldrSmlTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                            <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
+                            <YAxis tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dx={-10} domain={['auto', 'auto']} />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Legend />
+                            <Line type="monotone" dataKey="LDR" name="LDR (%)" stroke="#3498db" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                            <ReferenceLine y={85} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ position: 'top', value: 'NHNN Limit (85%)', fill: '#e74c3c', fontSize: 11, fontWeight: 600 }} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    <div className="card">
+                      <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <ShieldCheck color="#2ecc71" /> Short-term Funds for Med/Long-term Loans (SML)
+                      </h3>
+                      <div style={{ width: '100%', height: 300 }}>
+                        <ResponsiveContainer>
+                          <LineChart data={ldrSmlTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                            <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
+                            <YAxis tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dx={-10} domain={[0, 'dataMax + 10']} />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Legend />
+                            <Line type="monotone" dataKey="SML" name="SML (%)" stroke="#2ecc71" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                            <ReferenceLine y={30} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ position: 'top', value: 'NHNN Limit (<= 30%)', fill: '#e74c3c', fontSize: 11, fontWeight: 600 }} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Dòng 2.5: ROE vs ROA Trend & CAR Widget */}
                 <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '32px' }}>
                   <div className="card">
@@ -1491,6 +1599,7 @@ export default function Home() {
                     </div>
                   </div>
                 </div>
+
 
                 {/* Dòng 3: Balance Sheet */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px' }}>

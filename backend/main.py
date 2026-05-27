@@ -292,6 +292,10 @@ def get_sector_overview(user_id: str, sector: str, report_type: str = "Yearly", 
                 elif "interest and similar expenses" in ind: normalized_ind = "Interest Expense"
                 elif "deposits and borrowings from other credit institutions" in ind or "deposits and loans from other" in ind: normalized_ind = "Interbank Borrowings"
                 elif "valuable papers issued" in ind or "convertible bonds/cds and other valuable papers issued" in ind: normalized_ind = "Valuable Papers"
+                elif s_ind == "medium term loans": normalized_ind = "MediumTermLoans"
+                elif s_ind == "long term loans": normalized_ind = "LongTermLoans"
+                elif s_ind == "bl - total liabilities (within 1 to 5 years term)": normalized_ind = "BL_TotalLiab_1_5Y"
+                elif s_ind == "bl - total liabilities (over 5 years term)": normalized_ind = "BL_TotalLiab_Over5Y"
                 
                 # Grading
                 elif "substandard" == s_ind: normalized_ind = "Substandard"
@@ -374,7 +378,8 @@ def get_sector_overview(user_id: str, sector: str, report_type: str = "Yearly", 
         "Assets": [], "Interbank Assets": [], "Investment Securities": [], "Loans": [],
         "Deposits": [], "Valuable Papers": [], "Interbank Borrowings": [], "Equity": [],
         "NIM": [], "ROA": [], "ROE": [], "CIR": [], "NPL": [], "LLR": [], "CAR": [],
-        "Gross Loans": [], "CASA Amount": []
+        "Gross Loans": [], "CASA Amount": [],
+        "MediumTermLoans": [], "LongTermLoans": [], "BL_TotalLiab_1_5Y": [], "BL_TotalLiab_Over5Y": []
     }
     
     for ticker, t_data in all_data.items():
@@ -558,7 +563,7 @@ def get_sector_overview(user_id: str, sector: str, report_type: str = "Yearly", 
             arrs["LLR"].append(llr_ratio)
             arrs["CAR"].append(car)
             
-            for m in ["NII", "Net Profit", "Net Profit Parent", "Net Fee", "Net FX", "Net Trading Sec", "Net Inv Sec", "Dividends", "Other Income", "OPEX", "Provision", "PBT", "Tax", "Minority Interest", "Assets", "Interbank Assets", "Investment Securities", "Loans", "Deposits", "Valuable Papers", "Interbank Borrowings", "Equity"]:
+            for m in ["NII", "Net Profit", "Net Profit Parent", "Net Fee", "Net FX", "Net Trading Sec", "Net Inv Sec", "Dividends", "Other Income", "OPEX", "Provision", "PBT", "Tax", "Minority Interest", "Assets", "Interbank Assets", "Investment Securities", "Loans", "Deposits", "Valuable Papers", "Interbank Borrowings", "Equity", "MediumTermLoans", "LongTermLoans", "BL_TotalLiab_1_5Y", "BL_TotalLiab_Over5Y"]:
                 arrs[m].append(pd_vals.get(m, 0))
             
         for k in metrics_response.keys():
