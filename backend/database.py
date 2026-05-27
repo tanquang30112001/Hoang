@@ -5,7 +5,7 @@ import json
 DB_FILE = "findata.db"
 
 def create_connection():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False, timeout=30.0)
     conn.row_factory = sqlite3.Row
     return conn
 

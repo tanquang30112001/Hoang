@@ -57,18 +57,19 @@ def login(req: LoginRequest):
         raise HTTPException(status_code=400, detail="Username required")
         
     conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT user_id, username FROM users WHERE username = ?", (username,))
-    user = cursor.fetchone()
-    
-    if not user:
-        user_id = str(uuid.uuid4())
-        cursor.execute("INSERT INTO users (user_id, username) VALUES (?, ?)", (user_id, username))
-        conn.commit()
-    else:
-        user_id = user["user_id"]
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id, username FROM users WHERE username = ?", (username,))
+        user = cursor.fetchone()
         
-    conn.close()
+        if not user:
+            user_id = str(uuid.uuid4())
+            cursor.execute("INSERT INTO users (user_id, username) VALUES (?, ?)", (user_id, username))
+            conn.commit()
+        else:
+            user_id = user["user_id"]
+    finally:
+        conn.close()
     return {"user_id": user_id, "username": username}
 
 @app.post("/api/upload")
@@ -76,6 +77,7 @@ async def upload_file(user_id: str = Form(...), file: UploadFile = File(...)):
     if not file.filename.endswith(('.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail="Only Excel files are supported")
     
+    conn = None
     try:
         contents = await file.read()
         xls = pd.ExcelFile(io.BytesIO(contents))
@@ -152,54 +154,61 @@ async def upload_file(user_id: str = Form(...), file: UploadFile = File(...)):
         ''', (upload_id, user_id, ticker, icb_level_2, json_data, report_type))
         
         conn.commit()
-        conn.close()
-        
         return {"message": "File processed and saved securely", "ticker": ticker}
         
     except Exception as e:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
 
 @app.get("/api/industries")
 def get_industries(user_id: str):
     conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT DISTINCT icb_level_2 
-        FROM companies 
-        WHERE icb_level_2 != 'Unknown' AND icb_level_2 != 'nan' AND icb_level_2 != ''
-        ORDER BY icb_level_2
-    ''')
-    rows = cursor.fetchall()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT DISTINCT icb_level_2 
+            FROM companies 
+            WHERE icb_level_2 != 'Unknown' AND icb_level_2 != 'nan' AND icb_level_2 != ''
+            ORDER BY icb_level_2
+        ''')
+        rows = cursor.fetchall()
+    finally:
+        conn.close()
     return {"industries": [r["icb_level_2"] for r in rows]}
 
 @app.get("/api/stocks")
 def get_stocks(user_id: str, industry: str, report_type: str = "Yearly"):
     conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT DISTINCT ticker 
-        FROM user_uploaded_stocks 
-        WHERE user_id = ? AND icb_level_2 = ? AND report_type = ?
-        ORDER BY ticker
-    ''', (user_id, industry, report_type))
-    rows = cursor.fetchall()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT DISTINCT ticker 
+            FROM user_uploaded_stocks 
+            WHERE user_id = ? AND icb_level_2 = ? AND report_type = ?
+            ORDER BY ticker
+        ''', (user_id, industry, report_type))
+        rows = cursor.fetchall()
+    finally:
+        conn.close()
     return {"stocks": [dict(r) for r in rows]}
 
 @app.get("/api/metrics/{ticker}")
 def get_metrics(user_id: str, ticker: str, report_type: str = "Yearly"):
     conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT custom_data 
-        FROM user_uploaded_stocks 
-        WHERE user_id = ? AND ticker = ? AND report_type = ?
-    ''', (user_id, ticker, report_type))
-    row = cursor.fetchone()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT custom_data 
+            FROM user_uploaded_stocks 
+            WHERE user_id = ? AND ticker = ? AND report_type = ?
+        ''', (user_id, ticker, report_type))
+        row = cursor.fetchone()
+    finally:
+        conn.close()
     
     if not row:
          return {"metrics": []}
@@ -249,14 +258,16 @@ def get_metrics(user_id: str, ticker: str, report_type: str = "Yearly"):
 @app.get("/api/sectors/{sector}/overview")
 def get_sector_overview(user_id: str, sector: str, report_type: str = "Yearly", last_periods: int = 6):
     conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT ticker, custom_data 
-        FROM user_uploaded_stocks 
-        WHERE user_id = ? AND icb_level_2 = ? AND report_type = ?
-    ''', (user_id, sector, report_type))
-    rows = cursor.fetchall()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT ticker, custom_data 
+            FROM user_uploaded_stocks 
+            WHERE user_id = ? AND icb_level_2 = ? AND report_type = ?
+        ''', (user_id, sector, report_type))
+        rows = cursor.fetchall()
+    finally:
+        conn.close()
 
     if not rows:
         return {"sector": sector, "periods": [], "metrics": {}}
@@ -591,31 +602,35 @@ def get_sector_overview(user_id: str, sector: str, report_type: str = "Yearly", 
 @app.post("/api/dashboard/save")
 def save_dashboard(req: DashboardSaveRequest):
     conn = get_db()
-    cursor = conn.cursor()
-    dashboard_id = str(uuid.uuid4())
-    tickers_json = json.dumps(req.selected_tickers)
-    
-    cursor.execute('''
-        INSERT INTO user_dashboards (dashboard_id, user_id, active_icb_sector, active_report_type, selected_tickers, chart_settings)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET
-            active_icb_sector=excluded.active_icb_sector,
-            active_report_type=excluded.active_report_type,
-            selected_tickers=excluded.selected_tickers,
-            last_updated=CURRENT_TIMESTAMP
-    ''', (dashboard_id, req.user_id, req.active_icb_sector, req.active_report_type, tickers_json, "{}"))
-    
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        dashboard_id = str(uuid.uuid4())
+        tickers_json = json.dumps(req.selected_tickers)
+        
+        cursor.execute('''
+            INSERT INTO user_dashboards (dashboard_id, user_id, active_icb_sector, active_report_type, selected_tickers, chart_settings)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                active_icb_sector=excluded.active_icb_sector,
+                active_report_type=excluded.active_report_type,
+                selected_tickers=excluded.selected_tickers,
+                last_updated=CURRENT_TIMESTAMP
+        ''', (dashboard_id, req.user_id, req.active_icb_sector, req.active_report_type, tickers_json, "{}"))
+        
+        conn.commit()
+    finally:
+        conn.close()
     return {"status": "success"}
 
 @app.get("/api/dashboard")
 def load_dashboard(user_id: str):
     conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM user_dashboards WHERE user_id = ?", (user_id,))
-    row = cursor.fetchone()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM user_dashboards WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+    finally:
+        conn.close()
     if row:
         row_dict = dict(row)
         return {
@@ -653,14 +668,16 @@ def get_stock_valuation(ticker: str, user_id: str, report_type: str = "Yearly"):
 
     # 2. Get financial data from DB
     conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT custom_data
-        FROM user_uploaded_stocks
-        WHERE user_id = ? AND ticker = ? AND report_type = ?
-    ''', (user_id, ticker, report_type))
-    row = cursor.fetchone()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT custom_data
+            FROM user_uploaded_stocks
+            WHERE user_id = ? AND ticker = ? AND report_type = ?
+        ''', (user_id, ticker, report_type))
+        row = cursor.fetchone()
+    finally:
+        conn.close()
 
     if not row:
         return {"error": "No financial data found", "ticker": ticker, "price": price}
@@ -781,14 +798,16 @@ def get_sector_valuation(sector: str, user_id: str, report_type: str = "Yearly")
     Returns PE, PB, ROE, EPS Growth, and Market Cap.
     """
     conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT ticker, custom_data
-        FROM user_uploaded_stocks
-        WHERE user_id = ? AND icb_level_2 = ? AND report_type = ?
-    ''', (user_id, sector, report_type))
-    rows = cursor.fetchall()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT ticker, custom_data
+            FROM user_uploaded_stocks
+            WHERE user_id = ? AND icb_level_2 = ? AND report_type = ?
+        ''', (user_id, sector, report_type))
+        rows = cursor.fetchall()
+    finally:
+        conn.close()
 
     if not rows:
         return {"valuation": []}
