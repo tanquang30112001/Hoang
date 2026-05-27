@@ -4,3 +4,4 @@ pandas
 uvicorn
 vnstock
 openpyxl
+python-multipart
