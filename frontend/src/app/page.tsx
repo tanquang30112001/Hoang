@@ -10,6 +10,17 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 // Fixed workspace user – no login required
 const USER_ID = "059a4524-555c-491a-8c8a-dc9618f8d788";
 
+// ── SWR Cache helpers (localStorage) ─────────────────────────────────────────
+const cacheSet = (key: string, data: any) => {
+  try { localStorage.setItem(`findata_cache_${key}`, JSON.stringify(data)); } catch {}
+};
+const cacheGet = <T>(key: string): T | null => {
+  try {
+    const raw = localStorage.getItem(`findata_cache_${key}`);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch { return null; }
+};
+
 const formatNumber = (num: number) => {
   return new Intl.NumberFormat('en-GB', { maximumFractionDigits: 2 }).format(num);
 };
@@ -80,13 +91,23 @@ export default function Home() {
   useEffect(() => {
     if (selectedTickers.length === 1) {
       const ticker = selectedTickers[0];
-      setValuation(null);
-      setValuationLoading(true);
+      const cacheKey = `valuation_${ticker}_${reportType}`;
+      // Show cached data immediately (stale)
+      const cached = cacheGet<any>(cacheKey);
+      if (cached) {
+        setValuation(cached);
+        setValuationLoading(false);
+      } else {
+        setValuation(null);
+        setValuationLoading(true);
+      }
+      // Fetch fresh data in background
       fetch(`${API_BASE_URL}/api/stocks/${ticker}/valuation?user_id=${USER_ID}&report_type=${reportType}`)
         .then(r => r.json())
-        .then(data => { 
-          setValuation(data); 
-          setValuationLoading(false); 
+        .then(data => {
+          setValuation(data);
+          setValuationLoading(false);
+          cacheSet(cacheKey, data);
           setLastRefreshTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
         })
         .catch(() => setValuationLoading(false));
@@ -95,20 +116,33 @@ export default function Home() {
     }
   }, [selectedTickers, reportType, refreshTrigger]);
 
+
   
   useEffect(() => {
     if (selectedIndustry) {
-      setSectorValuationLoading(true);
+      const cacheKey = `sector_valuation_${selectedIndustry}_${reportType}`;
+      // Show cached data immediately (stale)
+      const cached = cacheGet<any[]>(cacheKey);
+      if (cached) {
+        setSectorValuation(cached);
+        setSectorValuationLoading(false);
+      } else {
+        setSectorValuationLoading(true);
+      }
+      // Fetch fresh data in background
       fetch(`${API_BASE_URL}/api/sectors/${encodeURIComponent(selectedIndustry)}/valuation?user_id=${USER_ID}&report_type=${reportType}`)
         .then(r => r.json())
         .then(data => {
-          setSectorValuation(data.valuation || []);
+          const val = data.valuation || [];
+          setSectorValuation(val);
           setSectorValuationLoading(false);
+          cacheSet(cacheKey, val);
           setLastRefreshTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
         })
         .catch(() => setSectorValuationLoading(false));
     }
   }, [selectedIndustry, reportType, refreshTrigger]);
+
 
 
   // Live data auto-refresh interval effect
@@ -151,34 +185,55 @@ export default function Home() {
 
 
   const fetchIndustries = async (userId: string) => {
+    const cacheKey = `industries_${userId}`;
+    // Show cached immediately
+    const cached = cacheGet<string[]>(cacheKey);
+    if (cached) setIndustries(cached);
+    // Revalidate in background
     try {
       const res = await fetch(`${API_BASE_URL}/api/industries?user_id=${userId}`);
       const data = await res.json();
-      setIndustries(data.industries || []);
+      const list = data.industries || [];
+      setIndustries(list);
+      cacheSet(cacheKey, list);
     } catch (e) {
       console.error(e);
     }
   };
 
   const fetchStocks = async (userId: string, ind: string, rType: string) => {
+    const cacheKey = `stocks_${userId}_${ind}_${rType}`;
+    // Show cached immediately
+    const cached = cacheGet<any[]>(cacheKey);
+    if (cached) setStocks(cached);
+    // Revalidate in background
     try {
       const res = await fetch(`${API_BASE_URL}/api/stocks?user_id=${userId}&industry=${encodeURIComponent(ind)}&report_type=${rType}`);
       const data = await res.json();
-      setStocks(data.stocks || []);
+      const list = data.stocks || [];
+      setStocks(list);
+      cacheSet(cacheKey, list);
     } catch (e) {
       console.error(e);
     }
   };
 
   const fetchSectorOverview = async (userId: string, ind: string, rType: string, periods: number) => {
+    const cacheKey = `sector_overview_${userId}_${ind}_${rType}_${periods}`;
+    // Show cached immediately
+    const cached = cacheGet<any>(cacheKey);
+    if (cached) setSectorOverview(cached);
+    // Revalidate in background
     try {
       const res = await fetch(`${API_BASE_URL}/api/sectors/${encodeURIComponent(ind)}/overview?user_id=${userId}&report_type=${rType}&last_periods=${periods}`);
       const data = await res.json();
       setSectorOverview(data);
+      cacheSet(cacheKey, data);
     } catch (e) {
       console.error(e);
     }
   };
+
 
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
