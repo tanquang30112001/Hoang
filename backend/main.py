@@ -41,6 +41,124 @@ app.add_middleware(
 def get_db():
     return create_connection()
 
+
+def fetch_realtime_price(ticker: str):
+    """
+    Fetch current price for a ticker with time-aware logic (Vietnam market hours, UTC+7):
+      - Before 09:00 (pre-market) : previous trading day's close from daily history
+      - 09:00 – 15:00 (trading)   : intraday last matched price (realtime tick)
+      - After 15:00 (post-market) : today's close from daily history
+    Falls back through multiple methods to ensure a valid price is always returned.
+    Returns (price_vnd: float | None, market_cap: float | None)
+    """
+    from datetime import datetime, timezone, timedelta, date as date_type
+    VN_TZ = timezone(timedelta(hours=7))
+    now_vn = datetime.now(VN_TZ)
+    hour_vn = now_vn.hour + now_vn.minute / 60.0  # e.g. 14.5 = 14:30
+
+    price = None
+    market_cap = None
+
+    try:
+        from vnstock import Vnstock
+        vn = Vnstock(source='VCI', show_log=False)
+        stock_obj = vn.stock(symbol=ticker, source='VCI')
+
+        def _to_vnd(raw):
+            """Convert raw price: if < 1000 it's in thousands VND (e.g. 33.65 → 33650)."""
+            if raw is None:
+                return None
+            raw = float(raw)
+            return raw * 1000 if raw < 1000 else raw
+
+        def _daily_close(target_date_str=None):
+            """Get close price from daily history. If target_date_str is None, gets latest available."""
+            try:
+                from datetime import timedelta
+                end = date_type.today()
+                start = end - timedelta(days=10)  # look back up to 10 days for last trading day
+                hist = stock_obj.quote.history(
+                    start=start.strftime('%Y-%m-%d'),
+                    end=end.strftime('%Y-%m-%d'),
+                    show_log=False
+                )
+                if hist is None or hist.empty:
+                    return None
+                if target_date_str:
+                    # Filter for a specific date
+                    hist['date_str'] = hist['time'].astype(str).str[:10]
+                    row = hist[hist['date_str'] == target_date_str]
+                    if not row.empty:
+                        return _to_vnd(row['close'].iloc[-1])
+                    return None
+                # Return the most recent close
+                return _to_vnd(hist['close'].iloc[-1])
+            except Exception as e:
+                print(f"vnstock daily history error for {ticker}: {e}")
+                return None
+
+        def _intraday_price():
+            """Get the last matched price from intraday ticks."""
+            try:
+                intraday = stock_obj.quote.intraday(show_log=False)
+                if intraday is not None and not intraday.empty:
+                    return _to_vnd(intraday['price'].iloc[-1])
+            except Exception as e:
+                print(f"vnstock intraday error for {ticker}: {e}")
+            # Fallback to 1-min history for today
+            try:
+                today_str = date_type.today().strftime('%Y-%m-%d')
+                hist1m = stock_obj.quote.history(start=today_str, end=today_str, interval='1m', show_log=False)
+                if hist1m is not None and not hist1m.empty:
+                    return _to_vnd(hist1m['close'].iloc[-1])
+            except Exception as e:
+                print(f"vnstock 1m history error for {ticker}: {e}")
+            return None
+
+        # ── Time-aware branching ──────────────────────────────────────────────
+        if hour_vn < 9.0:
+            # Pre-market: show previous trading day close
+            price = _daily_close()  # latest available close (yesterday or earlier)
+        elif hour_vn >= 15.0:
+            # Post-market: show today's final close
+            today_str = date_type.today().strftime('%Y-%m-%d')
+            price = _daily_close(target_date_str=today_str)
+            if not price:
+                price = _daily_close()  # today not available yet, take latest
+        else:
+            # During trading hours: realtime intraday
+            price = _intraday_price()
+            if not price:
+                price = _daily_close()  # fallback to latest daily close
+
+        # ── Final fallback: Company.overview (may return previous day close) ──
+        if not price or price == 0:
+            try:
+                from vnstock.api.company import Company
+                overview = Company(symbol=ticker, source='VCI').overview()
+                if not overview.empty:
+                    r = overview.iloc[0]
+                    price = float(r.get('current_price', 0)) or None
+                    market_cap = float(r.get('market_cap', 0)) or None
+            except Exception as e:
+                print(f"vnstock company overview error for {ticker}: {e}")
+
+        # ── Market cap from Company.overview if not fetched yet ───────────────
+        if price and price > 0 and not market_cap:
+            try:
+                from vnstock.api.company import Company
+                ov = Company(symbol=ticker, source='VCI').overview()
+                if not ov.empty:
+                    market_cap = float(ov.iloc[0].get('market_cap', 0)) or None
+            except Exception:
+                pass
+
+    except Exception as e:
+        print(f"fetch_realtime_price error for {ticker}: {e}")
+
+    return price, market_cap
+
+
 class LoginRequest(BaseModel):
     username: str
 
@@ -650,19 +768,8 @@ def get_stock_valuation(ticker: str, user_id: str, report_type: str = "Yearly"):
     - BVPS = Owner's Equity (latest period) * 1e9 / Outstanding Shares
     - P/E = Price / EPS,  P/B = Price / BVPS
     """
-    # 1. Fetch current price from vnstock
-    price = None
-    market_cap = None
-    try:
-        from vnstock.api.company import Company
-        overview = Company(symbol=ticker, source='VCI').overview()
-        if not overview.empty:
-            r = overview.iloc[0]
-            price = float(r.get('current_price', 0))
-            market_cap = float(r.get('market_cap', 0))
-    except Exception as e:
-        print(f"vnstock error for {ticker}: {e}")
-
+    # 1. Fetch current price with time-aware logic
+    price, market_cap = fetch_realtime_price(ticker)
     if not price or price == 0:
         return {"error": "Could not fetch current price", "ticker": ticker}
 
@@ -820,17 +927,7 @@ def get_sector_valuation(sector: str, user_id: str, report_type: str = "Yearly")
     tickers = [row["ticker"] for row in rows]
 
     def fetch_price_mc(t_sym):
-        t_price = None
-        t_mc = None
-        try:
-            from vnstock.api.company import Company
-            overview = Company(symbol=t_sym, source='VCI').overview()
-            if not overview.empty:
-                r = overview.iloc[0]
-                t_price = float(r.get('current_price', 0))
-                t_mc = float(r.get('market_cap', 0))
-        except Exception as e:
-            print(f"vnstock error for {t_sym}: {e}")
+        t_price, t_mc = fetch_realtime_price(t_sym)
         return t_sym, t_price, t_mc
 
     # Fetch all prices/market caps in parallel
