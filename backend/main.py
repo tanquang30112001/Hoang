@@ -1,3 +1,12 @@
+import sys
+try:
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8')
+except Exception:
+    pass
+
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -49,6 +58,17 @@ def get_db():
 _price_cache: dict = {}
 PRICE_CACHE_TRADING_TTL = 5 * 60      # 5 min during market hours
 PRICE_CACHE_OFFMARKET_TTL = 30 * 60   # 30 min pre/post market
+
+# Stores {f"{ticker}_{range}": (formatted_history_data, fetched_at_unix)}
+_history_cache: dict = {}
+HISTORY_CACHE_TRADING_TTL = 15 * 60    # 15 min during market hours
+HISTORY_CACHE_OFFMARKET_TTL = 60 * 60  # 60 min off-market
+
+# Sector overview and valuation caches
+_sector_overview_cache: dict = {}
+_sector_static_valuation_cache: dict = {}
+
+
 
 
 def _is_market_hours() -> bool:
@@ -171,14 +191,78 @@ def fetch_realtime_price(ticker: str):
             except Exception:
                 pass
 
-    except Exception as e:
+    except BaseException as e:
         print(f"fetch_realtime_price error for {ticker}: {e}")
 
     # ── Store in cache (even if None, to avoid hammering failing endpoints) ───
-    if price and price > 0:
-        _price_cache[ticker] = (price, market_cap, now_ts)
+    _price_cache[ticker] = (price, market_cap, now_ts)
 
     return price, market_cap
+
+
+def fetch_realtime_prices_batch(tickers: list[str]):
+    """
+    Fetch current prices for multiple tickers at once using Trading(source='KBS').price_board().
+    Updates the global _price_cache to avoid subsequent individual fetches.
+    Returns a dict of {ticker: (price, market_cap)}
+    """
+    now_ts = time.time()
+    results = {}
+
+    is_trading = _is_market_hours()
+    cache_ttl = PRICE_CACHE_TRADING_TTL if is_trading else PRICE_CACHE_OFFMARKET_TTL
+
+    missing_tickers = []
+    for t in tickers:
+        if t in _price_cache:
+            cached_price, cached_mc, cached_at = _price_cache[t]
+            if now_ts - cached_at < cache_ttl:
+                results[t] = (cached_price, cached_mc)
+                continue
+        missing_tickers.append(t)
+
+    if not missing_tickers:
+        return results
+
+    try:
+        from vnstock import Trading
+        t_api = Trading(source='KBS')
+        df = t_api.price_board(missing_tickers)
+
+        if df is not None and not df.empty:
+            for _, row in df.iterrows():
+                symbol = str(row.get('symbol')).strip()
+                close_price = row.get('close_price')
+                
+                # Fallback to reference/open if close is missing or 0
+                if not close_price or pd.isna(close_price) or close_price == 0:
+                    close_price = row.get('reference_price') or row.get('open_price')
+                
+                if close_price and not pd.isna(close_price):
+                    close_price = float(close_price)
+                    if 0 < close_price < 1000:
+                        close_price *= 1000
+                else:
+                    close_price = None
+
+                # Store in cache
+                _price_cache[symbol] = (close_price, None, now_ts)
+                results[symbol] = (close_price, None)
+    except Exception as e:
+        print(f"fetch_realtime_prices_batch error: {e}")
+
+    # Fallback for any tickers still missing
+    for t in missing_tickers:
+        if t not in results:
+            try:
+                price, mc = fetch_realtime_price(t)
+                results[t] = (price, mc)
+            except Exception:
+                _price_cache[t] = (None, None, now_ts)
+                results[t] = (None, None)
+
+    return results
+
 
 
 class LoginRequest(BaseModel):
@@ -294,6 +378,8 @@ async def upload_file(user_id: str = Form(...), file: UploadFile = File(...)):
         ''', (upload_id, user_id, ticker, icb_level_2, json_data, report_type))
         
         conn.commit()
+        _sector_overview_cache.clear()
+        _sector_static_valuation_cache.clear()
         return {"message": "File processed and saved securely", "ticker": ticker}
         
     except Exception as e:
@@ -365,7 +451,7 @@ def get_metrics(user_id: str, ticker: str, report_type: str = "Yearly"):
             
             # Income Statement
             if "net interest income" in ind_lower: normalized_ind = "Net Interest Income"
-            elif "profit before tax" in ind_lower: normalized_ind = "Profit Before Tax"
+            elif "profit before tax" in ind_lower or "profit/(loss) before tax" in ind_lower: normalized_ind = "Profit Before Tax"
             elif "net sales" in ind_lower: normalized_ind = "Net Sales"
             elif "net profit" in ind_lower: normalized_ind = "Net Profit"
             # Balance Sheet
@@ -397,6 +483,10 @@ def get_metrics(user_id: str, ticker: str, report_type: str = "Yearly"):
 
 @app.get("/api/sectors/{sector}/overview")
 def get_sector_overview(user_id: str, sector: str, report_type: str = "Yearly", last_periods: int = 6):
+    cache_key = f"{user_id}_{sector}_{report_type}_{last_periods}"
+    if cache_key in _sector_overview_cache:
+        return _sector_overview_cache[cache_key]
+
     conn = get_db()
     try:
         cursor = conn.cursor()
@@ -445,8 +535,34 @@ def get_sector_overview(user_id: str, sector: str, report_type: str = "Yearly", 
                 elif "valuable papers issued" in ind or "convertible bonds/cds and other valuable papers issued" in ind: normalized_ind = "Valuable Papers"
                 elif s_ind == "medium term loans": normalized_ind = "MediumTermLoans"
                 elif s_ind == "long term loans": normalized_ind = "LongTermLoans"
-                elif s_ind == "bl - total liabilities (within 1 to 5 years term)": normalized_ind = "BL_TotalLiab_1_5Y"
-                elif s_ind == "bl - total liabilities (over 5 years term)": normalized_ind = "BL_TotalLiab_Over5Y"
+                elif s_ind == "net sales": normalized_ind = "Net Sales"
+                elif s_ind == "sales" or s_ind == "revenue" or s_ind == "gross sales": normalized_ind = "Gross Sales"
+                elif s_ind == "gross profit": normalized_ind = "Gross Profit"
+                elif s_ind == "selling expenses": normalized_ind = "Selling Expenses"
+                elif s_ind == "general and admin expenses" or s_ind == "general & admin expenses": normalized_ind = "Admin Expenses"
+                elif s_ind == "operating profit/(loss)" or s_ind == "operating profit": normalized_ind = "Operating Profit"
+                elif s_ind == "short-term borrowings" or s_ind == "short term borrowings": normalized_ind = "ShortTermDebt"
+                elif s_ind == "long-term borrowings" or s_ind == "long term borrowings": normalized_ind = "LongTermDebt"
+                elif "interest and similar expenses" in ind or "interest expenses" in ind or "interest expense" in ind: normalized_ind = "Interest Expense"
+                elif s_ind == "cash and cash equivalents" or s_ind == "cash": normalized_ind = "Cash"
+                elif s_ind == "accounts receivable" or s_ind == "trade accounts receivable": normalized_ind = "Receivables"
+                elif s_ind == "inventories" or s_ind == "inventories, net": normalized_ind = "Inventories"
+                elif s_ind == "fixed assets": normalized_ind = "Fixed Assets"
+                elif s_ind in ["trade accounts payable", "accounts payable", "trade payables", "payables"]: normalized_ind = "Payables"
+                elif s_ind in ["cost of sales", "cost of goods sold", "cogs"]: normalized_ind = "COGS"
+                elif s_ind == "net cash inflows/(outflows) from operating activities" or s_ind == "net cash from operating activities": normalized_ind = "CFO"
+                elif s_ind == "net cash inflows/(outflows) from investing activities" or s_ind == "net cash from investing activities": normalized_ind = "CFI"
+                elif s_ind == "net cash inflows/(outflows) from financing activities" or s_ind == "net cash from financing activities": normalized_ind = "CFF"
+                elif s_ind == "purchases of fixed assets and other long term assets": normalized_ind = "CFI_Capex"
+                elif s_ind == "proceeds from disposal of fixed assets": normalized_ind = "CFI_Disposal"
+                elif s_ind == "loans granted, purchases of debt instruments": normalized_ind = "CFI_LoansGranted"
+                elif s_ind == "collection of loans, proceeds from sales of debts instruments": normalized_ind = "CFI_LoansCollected"
+                elif s_ind == "proceeds from issue of shares": normalized_ind = "CFF_ShareIssue"
+                elif s_ind == "payments for share returns and repurchases": normalized_ind = "CFF_ShareRepurchase"
+                elif s_ind == "proceeds from loans": normalized_ind = "CFF_Borrowings"
+                elif s_ind == "repayment of loans": normalized_ind = "CFF_Repayments"
+                elif s_ind == "finance lease principal payments": normalized_ind = "CFF_Lease"
+                elif s_ind == "dividends paid": normalized_ind = "CFF_Dividends"
                 
                 # Grading
                 elif "substandard" == s_ind: normalized_ind = "Substandard"
@@ -482,9 +598,9 @@ def get_sector_overview(user_id: str, sector: str, report_type: str = "Yearly", 
                 elif "dividends income" in ind: normalized_ind = "Dividends"
                 elif "operating expenses" == s_ind or "general and admin expenses" in ind: normalized_ind = "OPEX"
                 elif "provision for credit losses" in ind: normalized_ind = "Provision"
-                elif "business income tax" in ind: normalized_ind = "Tax"
+                elif "business income tax" in ind or "corporate income tax" in ind or "income tax expense" in ind: normalized_ind = "Tax"
                 elif "minority interest" in ind: normalized_ind = "Minority Interest"
-                elif "profit before tax" in ind: normalized_ind = "PBT"
+                elif "profit before tax" in ind or "profit/(loss) before tax" in ind or "profit before assessment" in ind: normalized_ind = "PBT"
                 
                 if normalized_ind:
                     period = str(item["period"]).strip()
@@ -507,6 +623,12 @@ def get_sector_overview(user_id: str, sector: str, report_type: str = "Yearly", 
                         # and positive in Cash Flow/Notes, and prevents double-counting across sheets.
                         if abs(val) > abs(current_val):
                             ticker_data[y][normalized_ind] = val
+        
+        # Fallback for Net Sales if not explicitly populated
+        for y in ticker_data:
+            if "Net Sales" not in ticker_data[y] and "Gross Sales" in ticker_data[y]:
+                ticker_data[y]["Net Sales"] = ticker_data[y]["Gross Sales"]
+
         all_data[ticker] = ticker_data
 
     def period_sort_key(p: str):
@@ -528,7 +650,15 @@ def get_sector_overview(user_id: str, sector: str, report_type: str = "Yearly", 
         "Deposits": [], "Valuable Papers": [], "Interbank Borrowings": [], "Equity": [],
         "NIM": [], "ROA": [], "ROE": [], "CIR": [], "NPL": [], "LLR": [], "CAR": [],
         "Gross Loans": [], "CASA Amount": [],
-        "MediumTermLoans": [], "LongTermLoans": [], "BL_TotalLiab_1_5Y": [], "BL_TotalLiab_Over5Y": []
+        "MediumTermLoans": [], "LongTermLoans": [], "BL_TotalLiab_1_5Y": [], "BL_TotalLiab_Over5Y": [],
+        "Net Sales": [], "Gross Profit": [], "Selling Expenses": [], "Admin Expenses": [],
+        "GPM": [], "SG&A Margin": [], "Parent Profit Margin": [], "OPM": [], "Operating Profit": [],
+        "ShortTermDebt": [], "LongTermDebt": [], "Interest Expense": [], "Receivables": [], "Inventories": [], "Fixed Assets": [], "Cash": [],
+        "Receivable Days": [], "Inventory Days": [], "Payable Days": [], "CCC": [], "COGS": [], "Payables": [],
+        "CFO": [], "CFI": [], "CFF": [],
+        "CFI_NetCapex": [], "CFI_NetLoans": [], "CFI_Other": [],
+        "CFF_ShareIssue": [], "CFF_ShareRepurchase": [], "CFF_NetBorrowing": [], "CFF_Lease": [], "CFF_Dividends": [], "CFF_Other": [],
+        "FCFE": []
     }
     
     for ticker, t_data in all_data.items():
@@ -713,6 +843,57 @@ def get_sector_overview(user_id: str, sector: str, report_type: str = "Yearly", 
             opex = pd_vals.get("OPEX", 0)
             cir = round((abs(opex) / toi * 100), 2) if toi > 0 else 0
             
+            # F&B Metrics calculation
+            net_sales = pd_vals.get("Net Sales", 0)
+            if net_sales == 0:
+                net_sales = pd_vals.get("Sales", 0)
+            
+            gross_profit = pd_vals.get("Gross Profit", 0)
+            selling_exp = abs(pd_vals.get("Selling Expenses", 0))
+            admin_exp = abs(pd_vals.get("Admin Expenses", 0))
+            np_parent = pd_vals.get("Net Profit Parent", 0)
+            
+            # GPM
+            gpm = round((gross_profit / net_sales * 100), 2) if net_sales > 0 else 0.0
+            
+            # SG&A Margin
+            sga_margin = round(((selling_exp + admin_exp) / net_sales * 100), 2) if net_sales > 0 else 0.0
+            
+            # Operating Profit
+            operating_profit = pd_vals.get("Operating Profit", 0)
+            if operating_profit == 0:
+                operating_profit = gross_profit - selling_exp - admin_exp
+            
+            # OPM
+            opm = round((operating_profit / net_sales * 100), 2) if net_sales > 0 else 0.0
+            
+            # Parent Profit Margin
+            parent_margin = round((np_parent / net_sales * 100), 2) if net_sales > 0 else 0.0
+
+            # Working Capital Cycle (Days)
+            is_quarterly = "Q" in p
+            days_in_period = 90 if is_quarterly else 365
+            
+            # DSO (Receivable Days)
+            receivables = abs(pd_vals.get("Receivables", 0))
+            rec_days = round((receivables / net_sales * days_in_period), 2) if net_sales > 0 else 0.0
+            
+            # COGS
+            cogs = abs(pd_vals.get("COGS", 0))
+            if cogs == 0:
+                cogs = abs(net_sales - gross_profit)
+            
+            # DIO (Inventory Days)
+            inventories = abs(pd_vals.get("Inventories", 0))
+            inv_days = round((inventories / cogs * days_in_period), 2) if cogs > 0 else 0.0
+            
+            # DPO (Payable Days)
+            payables = abs(pd_vals.get("Payables", 0))
+            pay_days = round((payables / cogs * days_in_period), 2) if cogs > 0 else 0.0
+            
+            # CCC (Cash Conversion Cycle)
+            ccc = round(rec_days + inv_days - pay_days, 2)
+
             arrs["Credit Growth"].append(credit_growth)
             arrs["Deposit Growth"].append(deposit_growth)
             arrs["LDR"].append(ldr)
@@ -726,18 +907,72 @@ def get_sector_overview(user_id: str, sector: str, report_type: str = "Yearly", 
             arrs["NPL"].append(npl_ratio)
             arrs["LLR"].append(llr_ratio)
             arrs["CAR"].append(car)
+
+            arrs["GPM"].append(gpm)
+            arrs["SG&A Margin"].append(sga_margin)
+            arrs["Parent Profit Margin"].append(parent_margin)
+            arrs["OPM"].append(opm)
             
-            for m in ["NII", "Net Profit", "Net Profit Parent", "Net Fee", "Net FX", "Net Trading Sec", "Net Inv Sec", "Dividends", "Other Income", "OPEX", "Provision", "PBT", "Tax", "Minority Interest", "Assets", "Interbank Assets", "Investment Securities", "Loans", "Deposits", "Valuable Papers", "Interbank Borrowings", "Equity", "MediumTermLoans", "LongTermLoans", "BL_TotalLiab_1_5Y", "BL_TotalLiab_Over5Y"]:
+            # Append Working Capital Days & CCC
+            arrs["Receivable Days"].append(rec_days)
+            arrs["Inventory Days"].append(inv_days)
+            arrs["Payable Days"].append(pay_days)
+            arrs["CCC"].append(ccc)
+            
+            # Cash Flow calculations
+            cfo = pd_vals.get("CFO", 0)
+            cfi = pd_vals.get("CFI", 0)
+            cff = pd_vals.get("CFF", 0)
+            
+            cfi_capex = pd_vals.get("CFI_Capex", 0)
+            cfi_disp = pd_vals.get("CFI_Disposal", 0)
+            cfi_loans_g = pd_vals.get("CFI_LoansGranted", 0)
+            cfi_loans_c = pd_vals.get("CFI_LoansCollected", 0)
+            
+            cfi_net_capex = cfi_capex + cfi_disp
+            cfi_net_loans = cfi_loans_g + cfi_loans_c
+            cfi_other = cfi - (cfi_net_capex + cfi_net_loans)
+            
+            cff_issue = pd_vals.get("CFF_ShareIssue", 0)
+            cff_rep = pd_vals.get("CFF_ShareRepurchase", 0)
+            cff_borrow = pd_vals.get("CFF_Borrowings", 0)
+            cff_repay = pd_vals.get("CFF_Repayments", 0)
+            
+            cff_net_borrowing = cff_borrow + cff_repay
+            cff_lease = pd_vals.get("CFF_Lease", 0)
+            cff_div = pd_vals.get("CFF_Dividends", 0)
+            cff_other = cff - (cff_issue + cff_rep + cff_net_borrowing + cff_lease + cff_div)
+            
+            # FCFE = CFO + Capex + Net Borrowings
+            fcfe = cfo + cfi_capex + cff_borrow + cff_repay
+
+            arrs["CFO"].append(cfo)
+            arrs["CFI"].append(cfi)
+            arrs["CFF"].append(cff)
+            arrs["CFI_NetCapex"].append(cfi_net_capex)
+            arrs["CFI_NetLoans"].append(cfi_net_loans)
+            arrs["CFI_Other"].append(cfi_other)
+            arrs["CFF_ShareIssue"].append(cff_issue)
+            arrs["CFF_ShareRepurchase"].append(cff_rep)
+            arrs["CFF_NetBorrowing"].append(cff_net_borrowing)
+            arrs["CFF_Lease"].append(cff_lease)
+            arrs["CFF_Dividends"].append(cff_div)
+            arrs["CFF_Other"].append(cff_other)
+            arrs["FCFE"].append(fcfe)
+            
+            for m in ["NII", "Net Profit", "Net Profit Parent", "Net Fee", "Net FX", "Net Trading Sec", "Net Inv Sec", "Dividends", "Other Income", "OPEX", "Provision", "PBT", "Tax", "Minority Interest", "Assets", "Interbank Assets", "Investment Securities", "Loans", "Deposits", "Valuable Papers", "Interbank Borrowings", "Equity", "MediumTermLoans", "LongTermLoans", "BL_TotalLiab_1_5Y", "BL_TotalLiab_Over5Y", "Net Sales", "Gross Profit", "Selling Expenses", "Admin Expenses", "Operating Profit", "ShortTermDebt", "LongTermDebt", "Interest Expense", "Receivables", "Inventories", "Fixed Assets", "Cash", "COGS", "Payables"]:
                 arrs[m].append(pd_vals.get(m, 0))
             
         for k in metrics_response.keys():
             metrics_response[k].append({"ticker": ticker, "data": arrs[k][-last_periods:]})
         
-    return {
+    res = {
         "sector": sector,
         "periods": sorted_periods[-last_periods:],
         "metrics": metrics_response
     }
+    _sector_overview_cache[cache_key] = res
+    return res
 
 @app.post("/api/dashboard/save")
 def save_dashboard(req: DashboardSaveRequest):
@@ -780,7 +1015,99 @@ def load_dashboard(user_id: str):
         }
     return None
 
+@app.get("/api/stocks/{ticker}/history")
+def get_stock_history(ticker: str, range: str = "3M"):
+    """
+    Fetch historical prices and volumes from vnstock based on the requested range.
+    Supported ranges: YTD, 1M, 3M, 5M, 1Y, 3Y, 5Y, ALL
+    """
+    now_ts = time.time()
+    is_trading = _is_market_hours()
+    cache_ttl = HISTORY_CACHE_TRADING_TTL if is_trading else HISTORY_CACHE_OFFMARKET_TTL
+    cache_key = f"{ticker.upper()}_{range.upper()}"
+
+    # Cache hit
+    if cache_key in _history_cache:
+        cached_data, cached_at = _history_cache[cache_key]
+        if now_ts - cached_at < cache_ttl:
+            return {"history": cached_data}
+
+    # Cache miss
+    from datetime import date as date_type, timedelta
+    from vnstock import Vnstock
+    
+    end = date_type.today()
+    rng = range.upper()
+    if rng == "1M":
+        start = end - timedelta(days=30)
+    elif rng == "3M":
+        start = end - timedelta(days=90)
+    elif rng == "5M":
+        start = end - timedelta(days=150)
+    elif rng == "1Y":
+        start = end - timedelta(days=365)
+    elif rng == "3Y":
+        start = end - timedelta(days=365 * 3)
+    elif rng == "5Y":
+        start = end - timedelta(days=365 * 5)
+    elif rng == "YTD":
+        start = date_type(end.year, 1, 1)
+    elif rng == "ALL":
+        start = date_type(2010, 1, 1)
+    else:
+        start = end - timedelta(days=90)
+
+    try:
+        import sys, io, os
+        # Suppress vnstock's Vietnamese log output that crashes on Windows cp1252
+        old_stdout, old_stderr = sys.stdout, sys.stderr
+        sys.stdout = io.TextIOWrapper(io.BytesIO(), encoding='utf-8')
+        sys.stderr = io.TextIOWrapper(io.BytesIO(), encoding='utf-8')
+        try:
+            vn = Vnstock(source='VCI', show_log=False)
+            stock_obj = vn.stock(symbol=ticker.upper(), source='VCI')
+            hist = stock_obj.quote.history(
+                start=start.strftime('%Y-%m-%d'),
+                end=end.strftime('%Y-%m-%d'),
+                show_log=False
+            )
+        finally:
+            sys.stdout, sys.stderr = old_stdout, old_stderr
+
+        if hist is None or hist.empty:
+            return {"history": []}
+            
+        def to_vnd(price):
+            if price is None:
+                return 0.0
+            p = float(price)
+            return p * 1000 if p < 1000 else p
+
+        data = []
+        for _, row in hist.iterrows():
+            date_val = str(row['time'])[:10]
+            close_val = round(to_vnd(row.get('close', 0)), 0)
+            volume_val = int(row.get('volume', 0))
+            data.append({
+                "time": date_val,
+                "close": close_val,
+                "volume": volume_val
+            })
+            
+        # Store in cache
+        if data:
+            _history_cache[cache_key] = (data, now_ts)
+            
+        return {"history": data}
+    except Exception as e:
+        try:
+            print(f"Error fetching history for {ticker}: {e}")
+        except Exception:
+            pass
+        return {"error": str(e), "history": []}
+
 @app.get("/api/stocks/{ticker}/valuation")
+
 def get_stock_valuation(ticker: str, user_id: str, report_type: str = "Yearly"):
     """
     Fetch current price from vnstock and calculate P/E and P/B.
@@ -862,7 +1189,7 @@ def get_stock_valuation(ticker: str, user_id: str, report_type: str = "Yearly"):
                 elif ind == "owner's equity":
                     if abs(val) > abs(eq_val):
                         eq_val = val
-                elif ind == "charter capital":
+                elif ind == "charter capital" or ind == "paid-in capital":
                     if abs(val) > abs(cc_val):
                         cc_val = val
         return np_val, eq_val, cc_val
@@ -889,7 +1216,7 @@ def get_stock_valuation(ticker: str, user_id: str, report_type: str = "Yearly"):
         net_profit_for_eps, equity, charter_capital = get_metric_for_period(latest_period)
 
     if charter_capital == 0:
-        return {"error": "Charter capital not found", "ticker": ticker, "price": price}
+        return {"error": "Charter/Paid-in capital not found", "ticker": ticker, "price": price}
 
     # 5. Calculate ratios
     # DB values are in Billions VND → multiply by 1e9 to get absolute VND
@@ -909,7 +1236,7 @@ def get_stock_valuation(ticker: str, user_id: str, report_type: str = "Yearly"):
         "is_ttm": report_type == "Quarterly" and len(ttm_periods_used) > 0,
         "ttm_periods": ttm_periods_used,
         "price": price,
-        "market_cap": market_cap,
+        "market_cap": market_cap or (price * outstanding_shares if price and outstanding_shares else None),
         "charter_capital_bil": charter_capital,
         "outstanding_shares": outstanding_shares,
         "net_profit_bil": net_profit_for_eps,
@@ -926,170 +1253,186 @@ def get_sector_valuation(sector: str, user_id: str, report_type: str = "Yearly")
     Fetch valuation metrics for all stocks in the sector.
     Returns PE, PB, ROE, EPS Growth, and Market Cap.
     """
-    conn = get_db()
-    try:
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT ticker, custom_data
-            FROM user_uploaded_stocks
-            WHERE user_id = ? AND icb_level_2 = ? AND report_type = ?
-        ''', (user_id, sector, report_type))
-        rows = cursor.fetchall()
-    finally:
-        conn.close()
+    cache_key = f"{user_id}_{sector}_{report_type}"
+    static_data = _sector_static_valuation_cache.get(cache_key)
 
-    if not rows:
+    if static_data is None:
+        conn = get_db()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT ticker, custom_data
+                FROM user_uploaded_stocks
+                WHERE user_id = ? AND icb_level_2 = ? AND report_type = ?
+            ''', (user_id, sector, report_type))
+            rows = cursor.fetchall()
+        finally:
+            conn.close()
+
+        if not rows:
+            return {"valuation": []}
+
+        static_data = []
+        for row in rows:
+            ticker = row["ticker"]
+            custom_data = json.loads(row["custom_data"])
+
+            # Collect periods
+            all_periods = set()
+            for sheet, items in custom_data.items():
+                for item in items:
+                    period = str(item["period"]).strip()
+                    if report_type == "Yearly" and "Q" in period:
+                        continue
+                    if report_type == "Quarterly" and "Q" not in period:
+                        continue
+                    all_periods.add(period)
+
+            def period_sort_key(p: str):
+                if "Q" in p:
+                    parts = p.replace("Q", "").split("/")
+                    if len(parts) == 2:
+                        return (int(parts[1]), int(parts[0]))
+                elif p.replace('.0', '').isdigit():
+                    return (int(p.replace('.0', '')), 0)
+                return (0, 0)
+
+            sorted_periods = sorted(list(all_periods), key=period_sort_key)
+            if not sorted_periods:
+                continue
+
+            def get_metric_for_period(target_period: str):
+                np_val = 0.0
+                eq_val = 0.0
+                cc_val = 0.0
+                target = target_period.replace('.0', '')
+                for sheet, items in custom_data.items():
+                    for item in items:
+                        period = str(item["period"]).strip().replace('.0', '')
+                        if period != target:
+                            continue
+                        ind = item["indicator"].strip().lower()
+                        val = float(item["value"] or 0)
+
+                        if "attributable to parent company" in ind:
+                            if abs(val) > abs(np_val):
+                                np_val = val
+                        elif (ind == "net profit/(loss) after tax" or ind == "net profit") and np_val == 0:
+                            np_val = val
+                        elif ind == "owner's equity":
+                            if abs(val) > abs(eq_val):
+                                eq_val = val
+                        elif ind == "charter capital" or ind == "paid-in capital":
+                            if abs(val) > abs(cc_val):
+                                cc_val = val
+                return np_val, eq_val, cc_val
+
+            # Computation
+            latest_period = sorted_periods[-1]
+            eps_growth = 0.0
+            roe = 0.0
+            eps_curr = 0.0
+            bvps = 0.0
+
+            if report_type == "Quarterly":
+                # TTM for current
+                ttm_periods_curr = sorted_periods[-4:]
+                net_profit_ttm_curr = 0.0
+                for p in ttm_periods_curr:
+                    np_val, _, _ = get_metric_for_period(p)
+                    net_profit_ttm_curr += np_val
+
+                # TTM for previous (YoY comparison)
+                net_profit_ttm_prev = 0.0
+                if len(sorted_periods) >= 8:
+                    ttm_periods_prev = sorted_periods[-8:-4]
+                    for p in ttm_periods_prev:
+                        np_val, _, _ = get_metric_for_period(p)
+                        net_profit_ttm_prev += np_val
+
+                # Balance sheet from latest quarter
+                _, equity_0, charter_capital_0 = get_metric_for_period(latest_period)
+                
+                # Balance sheet from 4 quarters ago (for avg equity and prev shares)
+                equity_prev = 0.0
+                charter_capital_prev = 0.0
+                if len(sorted_periods) >= 5:
+                    _, equity_prev, charter_capital_prev = get_metric_for_period(sorted_periods[-5])
+
+                # Calculations
+                outstanding_shares_0 = charter_capital_0 * 1e9 / 10000
+                outstanding_shares_prev = charter_capital_prev * 1e9 / 10000 if charter_capital_prev > 0 else outstanding_shares_0
+
+                eps_curr = (net_profit_ttm_curr * 1e9 / outstanding_shares_0) if outstanding_shares_0 > 0 else 0
+                eps_prev = (net_profit_ttm_prev * 1e9 / outstanding_shares_prev) if outstanding_shares_prev > 0 else 0
+                
+                eps_growth = ((eps_curr - eps_prev) / eps_prev * 100) if eps_prev > 0 else 0.0
+                bvps = (equity_0 * 1e9 / outstanding_shares_0) if outstanding_shares_0 > 0 else 0
+
+                avg_equity = (equity_0 + equity_prev) / 2.0 if equity_prev > 0 else equity_0
+                roe = round((net_profit_ttm_curr / avg_equity * 100), 2) if avg_equity > 0 else 0.0
+
+            else:
+                # Yearly
+                t0 = sorted_periods[-1]
+                t_prev = sorted_periods[-2] if len(sorted_periods) >= 2 else None
+
+                net_profit_0, equity_0, charter_capital_0 = get_metric_for_period(t0)
+                
+                if t_prev:
+                    net_profit_prev, equity_prev, charter_capital_prev = get_metric_for_period(t_prev)
+                else:
+                    net_profit_prev, equity_prev, charter_capital_prev = 0.0, 0.0, 0.0
+
+                outstanding_shares_0 = charter_capital_0 * 1e9 / 10000
+                outstanding_shares_prev = charter_capital_prev * 1e9 / 10000 if charter_capital_prev > 0 else outstanding_shares_0
+
+                eps_curr = (net_profit_0 * 1e9 / outstanding_shares_0) if outstanding_shares_0 > 0 else 0
+                eps_prev = (net_profit_prev * 1e9 / outstanding_shares_prev) if outstanding_shares_prev > 0 else 0
+
+                eps_growth = ((eps_curr - eps_prev) / eps_prev * 100) if eps_prev > 0 else 0.0
+                bvps = (equity_0 * 1e9 / outstanding_shares_0) if outstanding_shares_0 > 0 else 0
+
+                avg_equity = (equity_0 + equity_prev) / 2.0 if equity_prev > 0 else equity_0
+                roe = round((net_profit_0 / avg_equity * 100), 2) if avg_equity > 0 else 0.0
+
+            static_data.append({
+                "ticker": ticker,
+                "eps_curr": eps_curr,
+                "bvps": bvps,
+                "eps_growth": round(eps_growth, 2),
+                "roe": roe,
+                "outstanding_shares": outstanding_shares_0
+            })
+        _sector_static_valuation_cache[cache_key] = static_data
+
+    # Now calculate PE and PB dynamically using latest realtime prices
+    if not static_data:
         return {"valuation": []}
 
+    tickers = [item["ticker"] for item in static_data]
+
+    # Fetch all prices/market caps in batch
+    price_mc_map = fetch_realtime_prices_batch(tickers)
+
     results = []
+    for item in static_data:
+        ticker = item["ticker"]
+        eps_curr = item["eps_curr"]
+        bvps = item["bvps"]
+        eps_growth = item["eps_growth"]
+        roe = item["roe"]
+        shares = item.get("outstanding_shares", 0)
 
-    # Import ThreadPoolExecutor to fetch prices in parallel
-    from concurrent.futures import ThreadPoolExecutor
-
-    tickers = [row["ticker"] for row in rows]
-
-    def fetch_price_mc(t_sym):
-        t_price, t_mc = fetch_realtime_price(t_sym)
-        return t_sym, t_price, t_mc
-
-    # Fetch all prices/market caps in parallel
-    price_mc_map = {}
-    with ThreadPoolExecutor(max_workers=min(len(tickers), 5)) as executor:
-        for t_sym, t_price, t_mc in executor.map(fetch_price_mc, tickers):
-            price_mc_map[t_sym] = (t_price, t_mc)
-
-    for row in rows:
-        ticker = row["ticker"]
-        custom_data = json.loads(row["custom_data"])
         price, market_cap = price_mc_map.get(ticker, (None, None))
-
         if not price or price == 0:
             continue
 
-        # Collect periods
-        all_periods = set()
-        for sheet, items in custom_data.items():
-            for item in items:
-                period = str(item["period"]).strip()
-                if report_type == "Yearly" and "Q" in period:
-                    continue
-                if report_type == "Quarterly" and "Q" not in period:
-                    continue
-                all_periods.add(period)
+        if not market_cap and shares > 0:
+            market_cap = price * shares
 
-        def period_sort_key(p: str):
-            if "Q" in p:
-                parts = p.replace("Q", "").split("/")
-                if len(parts) == 2:
-                    return (int(parts[1]), int(parts[0]))
-            elif p.replace('.0', '').isdigit():
-                return (int(p.replace('.0', '')), 0)
-            return (0, 0)
-
-        sorted_periods = sorted(list(all_periods), key=period_sort_key)
-        if not sorted_periods:
-            continue
-
-        def get_metric_for_period(target_period: str):
-            np_val = 0.0
-            eq_val = 0.0
-            cc_val = 0.0
-            target = target_period.replace('.0', '')
-            for sheet, items in custom_data.items():
-                for item in items:
-                    period = str(item["period"]).strip().replace('.0', '')
-                    if period != target:
-                        continue
-                    ind = item["indicator"].strip().lower()
-                    val = float(item["value"] or 0)
-
-                    if "attributable to parent company" in ind:
-                        if abs(val) > abs(np_val):
-                            np_val = val
-                    elif (ind == "net profit/(loss) after tax" or ind == "net profit") and np_val == 0:
-                        np_val = val
-                    elif ind == "owner's equity":
-                        if abs(val) > abs(eq_val):
-                            eq_val = val
-                    elif ind == "charter capital":
-                        if abs(val) > abs(cc_val):
-                            cc_val = val
-            return np_val, eq_val, cc_val
-
-        # Computation
-        latest_period = sorted_periods[-1]
-        eps_growth = 0.0
-        roe = 0.0
-        pe = None
-        pb = None
-
-        if report_type == "Quarterly":
-            # TTM for current
-            ttm_periods_curr = sorted_periods[-4:]
-            net_profit_ttm_curr = 0.0
-            for p in ttm_periods_curr:
-                np_val, _, _ = get_metric_for_period(p)
-                net_profit_ttm_curr += np_val
-
-            # TTM for previous (YoY comparison)
-            net_profit_ttm_prev = 0.0
-            if len(sorted_periods) >= 8:
-                ttm_periods_prev = sorted_periods[-8:-4]
-                for p in ttm_periods_prev:
-                    np_val, _, _ = get_metric_for_period(p)
-                    net_profit_ttm_prev += np_val
-
-            # Balance sheet from latest quarter
-            _, equity_0, charter_capital_0 = get_metric_for_period(latest_period)
-            
-            # Balance sheet from 4 quarters ago (for avg equity and prev shares)
-            equity_prev = 0.0
-            charter_capital_prev = 0.0
-            if len(sorted_periods) >= 5:
-                _, equity_prev, charter_capital_prev = get_metric_for_period(sorted_periods[-5])
-
-            # Calculations
-            outstanding_shares_0 = charter_capital_0 * 1e9 / 10000
-            outstanding_shares_prev = charter_capital_prev * 1e9 / 10000 if charter_capital_prev > 0 else outstanding_shares_0
-
-            eps_curr = (net_profit_ttm_curr * 1e9 / outstanding_shares_0) if outstanding_shares_0 > 0 else 0
-            eps_prev = (net_profit_ttm_prev * 1e9 / outstanding_shares_prev) if outstanding_shares_prev > 0 else 0
-            
-            eps_growth = ((eps_curr - eps_prev) / eps_prev * 100) if eps_prev > 0 else 0.0
-            bvps = (equity_0 * 1e9 / outstanding_shares_0) if outstanding_shares_0 > 0 else 0
-
-            pe = round(price / eps_curr, 2) if eps_curr > 0 else None
-            pb = round(price / bvps, 2) if bvps > 0 else None
-            
-            avg_equity = (equity_0 + equity_prev) / 2.0 if equity_prev > 0 else equity_0
-            roe = round((net_profit_ttm_curr / avg_equity * 100), 2) if avg_equity > 0 else 0.0
-
-        else:
-            # Yearly
-            t0 = sorted_periods[-1]
-            t_prev = sorted_periods[-2] if len(sorted_periods) >= 2 else None
-
-            net_profit_0, equity_0, charter_capital_0 = get_metric_for_period(t0)
-            
-            if t_prev:
-                net_profit_prev, equity_prev, charter_capital_prev = get_metric_for_period(t_prev)
-            else:
-                net_profit_prev, equity_prev, charter_capital_prev = 0.0, 0.0, 0.0
-
-            outstanding_shares_0 = charter_capital_0 * 1e9 / 10000
-            outstanding_shares_prev = charter_capital_prev * 1e9 / 10000 if charter_capital_prev > 0 else outstanding_shares_0
-
-            eps_curr = (net_profit_0 * 1e9 / outstanding_shares_0) if outstanding_shares_0 > 0 else 0
-            eps_prev = (net_profit_prev * 1e9 / outstanding_shares_prev) if outstanding_shares_prev > 0 else 0
-
-            eps_growth = ((eps_curr - eps_prev) / eps_prev * 100) if eps_prev > 0 else 0.0
-            bvps = (equity_0 * 1e9 / outstanding_shares_0) if outstanding_shares_0 > 0 else 0
-
-            pe = round(price / eps_curr, 2) if eps_curr > 0 else None
-            pb = round(price / bvps, 2) if bvps > 0 else None
-
-            avg_equity = (equity_0 + equity_prev) / 2.0 if equity_prev > 0 else equity_0
-            roe = round((net_profit_0 / avg_equity * 100), 2) if avg_equity > 0 else 0.0
+        pe = round(price / eps_curr, 2) if eps_curr > 0 else None
+        pb = round(price / bvps, 2) if bvps > 0 else None
 
         results.append({
             "ticker": ticker,
@@ -1097,7 +1440,7 @@ def get_sector_valuation(sector: str, user_id: str, report_type: str = "Yearly")
             "market_cap": market_cap,
             "pe": pe,
             "pb": pb,
-            "eps_growth": round(eps_growth, 2),
+            "eps_growth": eps_growth,
             "roe": roe
         })
 

@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { UploadCloud, FileSpreadsheet, ChevronRight, BarChart3, AlertCircle, Building2, TrendingUp, TrendingDown, Search, X, ChevronDown, Activity, PieChart as PieChartIcon, ShieldCheck, Wallet, Flame, Menu, ChevronLeft, Download, Printer, RefreshCw } from "lucide-react";
+import { UploadCloud, FileSpreadsheet, ChevronRight, BarChart3, AlertCircle, Building2, TrendingUp, TrendingDown, Search, X, ChevronDown, Activity, PieChart as PieChartIcon, ShieldCheck, Wallet, Flame, Menu, ChevronLeft, Download, Printer, RefreshCw, Filter } from "lucide-react";
 
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, PieChart, Pie, Sector, ComposedChart, ReferenceLine, ScatterChart, Scatter, ZAxis, LabelList, AreaChart, Area } from 'recharts';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 // Fixed workspace user – no login required
 const USER_ID = "059a4524-555c-491a-8c8a-dc9618f8d788";
@@ -48,6 +48,8 @@ export default function Home() {
   const [valuationLoading, setValuationLoading] = useState(false);
   const [sectorValuation, setSectorValuation] = useState<any[]>([]);
   const [sectorValuationLoading, setSectorValuationLoading] = useState(false);
+  const [stocksLoading, setStocksLoading] = useState(false);
+  const [sectorOverviewLoading, setSectorOverviewLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -55,6 +57,40 @@ export default function Home() {
   const [refreshInterval, setRefreshInterval] = useState<number | null>(60);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [lastRefreshTime, setLastRefreshTime] = useState<string>("");
+
+  const [historyRange, setHistoryRange] = useState<string>("3M");
+  const [historyData, setHistoryData] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  const [hiddenDataKeys, setHiddenDataKeys] = useState<Record<string, boolean>>({});
+
+  const handleLegendClick = (e: any) => {
+    const dataKey = e.dataKey || (e.payload && e.payload.dataKey);
+    if (dataKey) {
+      setHiddenDataKeys(prev => ({
+        ...prev,
+        [dataKey]: !prev[dataKey]
+      }));
+    }
+  };
+
+  const renderLegendText = (value: string, entry: any) => {
+    const dataKey = entry.dataKey || (entry.payload && entry.payload.dataKey);
+    const isHidden = dataKey ? hiddenDataKeys[dataKey] : false;
+    return (
+      <span style={{ 
+        color: isHidden ? 'var(--text-secondary)' : 'var(--text-primary)',
+        textDecoration: isHidden ? 'line-through' : 'none',
+        opacity: isHidden ? 0.4 : 1,
+        cursor: 'pointer',
+        fontWeight: isHidden ? 400 : 500,
+        userSelect: 'none'
+      }}>
+        {value}
+      </span>
+    );
+  };
+
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -110,11 +146,48 @@ export default function Home() {
           cacheSet(cacheKey, data);
           setLastRefreshTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
         })
-        .catch(() => setValuationLoading(false));
+        .catch((err) => {
+          console.warn("Valuation fetch failed:", err);
+          setValuationLoading(false);
+        });
     } else {
       setValuation(null);
     }
   }, [selectedTickers, reportType, refreshTrigger]);
+
+  // Fetch historical price & volume whenever a single ticker or range is selected
+  useEffect(() => {
+    if (selectedTickers.length === 1) {
+      const ticker = selectedTickers[0];
+      const cacheKey = `history_${ticker}_${historyRange}`;
+      // Show cached data immediately (stale)
+      const cached = cacheGet<any[]>(cacheKey);
+      if (cached) {
+        setHistoryData(cached);
+        setHistoryLoading(false);
+      } else {
+        setHistoryData([]);
+        setHistoryLoading(true);
+      }
+      // Fetch fresh data in background
+      fetch(`${API_BASE_URL}/api/stocks/${ticker}/history?range=${historyRange}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.history) {
+            setHistoryData(data.history);
+            cacheSet(cacheKey, data.history);
+          }
+          setHistoryLoading(false);
+        })
+        .catch((err) => {
+          console.warn("History fetch failed:", err);
+          setHistoryLoading(false);
+        });
+    } else {
+      setHistoryData([]);
+    }
+  }, [selectedTickers, historyRange, refreshTrigger]);
+
 
 
   
@@ -139,7 +212,10 @@ export default function Home() {
           cacheSet(cacheKey, val);
           setLastRefreshTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
         })
-        .catch(() => setSectorValuationLoading(false));
+        .catch((err) => {
+          console.warn("Sector valuation fetch failed:", err);
+          setSectorValuationLoading(false);
+        });
     }
   }, [selectedIndustry, reportType, refreshTrigger]);
 
@@ -167,7 +243,7 @@ export default function Home() {
         }
       }
     } catch (e) {
-      console.error(e);
+      console.warn("loadDashboard failed:", e);
     }
   };
 
@@ -179,7 +255,7 @@ export default function Home() {
         body: JSON.stringify({ user_id: userId, active_icb_sector: industry, active_report_type: rType, selected_tickers: tickers })
       });
     } catch (e) {
-      console.error(e);
+      console.warn("saveDashboard failed:", e);
     }
   };
 
@@ -197,7 +273,7 @@ export default function Home() {
       setIndustries(list);
       cacheSet(cacheKey, list);
     } catch (e) {
-      console.error(e);
+      console.warn("fetchIndustries failed:", e);
     }
   };
 
@@ -206,7 +282,8 @@ export default function Home() {
     // Show cached immediately
     const cached = cacheGet<any[]>(cacheKey);
     if (cached) setStocks(cached);
-    // Revalidate in background
+    
+    setStocksLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/api/stocks?user_id=${userId}&industry=${encodeURIComponent(ind)}&report_type=${rType}`);
       const data = await res.json();
@@ -214,7 +291,9 @@ export default function Home() {
       setStocks(list);
       cacheSet(cacheKey, list);
     } catch (e) {
-      console.error(e);
+      console.warn("fetchStocks failed:", e);
+    } finally {
+      setStocksLoading(false);
     }
   };
 
@@ -223,14 +302,17 @@ export default function Home() {
     // Show cached immediately
     const cached = cacheGet<any>(cacheKey);
     if (cached) setSectorOverview(cached);
-    // Revalidate in background
+    
+    setSectorOverviewLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/api/sectors/${encodeURIComponent(ind)}/overview?user_id=${userId}&report_type=${rType}&last_periods=${periods}`);
       const data = await res.json();
       setSectorOverview(data);
       cacheSet(cacheKey, data);
     } catch (e) {
-      console.error(e);
+      console.warn("fetchSectorOverview failed:", e);
+    } finally {
+      setSectorOverviewLoading(false);
     }
   };
 
@@ -372,25 +454,31 @@ export default function Home() {
   
   const absoluteData = useMemo(() => {
     if (!sectorOverview?.metrics?.ROA) return [];
-    return sectorOverview.metrics.ROA.map((item: any) => {
-       const ticker = item.ticker;
-       const getVal = (metric: string) => {
-         const mItem = sectorOverview.metrics[metric]?.find((n: any) => n.ticker === ticker);
-         return mItem ? mItem.data[activePeriodIndex] : 0;
-       };
-       return { 
-         name: ticker, 
-         NIM: getVal("NIM"), 
-         NPL: getVal("NPL"), 
-         LLR: getVal("LLR"),
-         CAR: getVal("CAR"),
-         ROA: getVal("ROA"),
-         ROE: getVal("ROE"),
-         GrossLoans: getVal("Gross Loans"),
-         CASAAmount: getVal("CASA Amount")
-       };
+    const mapped = sectorOverview.metrics.ROA.map((item: any) => {
+      const ticker = item.ticker;
+      const getVal = (metric: string) => {
+        const mItem = sectorOverview.metrics[metric]?.find((t: any) => t.ticker === ticker);
+        return mItem && mItem.data[activePeriodIndex] !== undefined ? mItem.data[activePeriodIndex] : 0;
+      };
+      return { 
+        name: ticker, 
+        NIM: getVal("NIM"), 
+        NPL: getVal("NPL"), 
+        LLR: getVal("LLR"),
+        CAR: getVal("CAR"),
+        ROA: getVal("ROA"),
+        ROE: getVal("ROE"),
+        GrossLoans: getVal("Gross Loans"),
+        CASAAmount: getVal("CASA Amount"),
+        GPM: getVal("GPM"),
+        SGAMargin: getVal("SG&A Margin"),
+        ParentProfitMargin: getVal("Parent Profit Margin"),
+        NetProfitParent: getVal("Net Profit Parent"),
+        OPM: getVal("OPM")
+      };
     });
-  }, [sectorOverview, activePeriodIndex]);
+    return mapped.filter((item: any) => !hiddenDataKeys[item.name]);
+  }, [sectorOverview, activePeriodIndex, hiddenDataKeys]);
 
   const nimSorted = [...absoluteData].sort((a,b) => b.NIM - a.NIM);
   const nplSorted = [...absoluteData].sort((a,b) => a.NPL - b.NPL); // Lower NPL is better, sort ascending
@@ -400,6 +488,11 @@ export default function Home() {
   const roeSorted = [...absoluteData].sort((a,b) => b.ROE - a.ROE);
   const grossLoansSorted = [...absoluteData].sort((a,b) => b.GrossLoans - a.GrossLoans);
   const casaAmountSorted = [...absoluteData].sort((a,b) => b.CASAAmount - a.CASAAmount);
+  const gpmSorted = [...absoluteData].sort((a,b) => b.GPM - a.GPM);
+  const sgaMarginSorted = [...absoluteData].sort((a,b) => b.SGAMargin - a.SGAMargin);
+  const parentProfitMarginSorted = [...absoluteData].sort((a,b) => b.ParentProfitMargin - a.ParentProfitMargin);
+  const netProfitParentSorted = [...absoluteData].sort((a,b) => b.NetProfitParent - a.NetProfitParent);
+  const opmSorted = [...absoluteData].sort((a,b) => b.OPM - a.OPM);
 
   const exportToCSV = () => {
     if (!sectorOverview) return;
@@ -471,6 +564,11 @@ export default function Home() {
   const yoeaData = useMemo(() => getTimeSeriesData("YOEA"), [sectorOverview]);
   const creditGrowthData = useMemo(() => getTimeSeriesData("Credit Growth"), [sectorOverview]);
   const depositGrowthData = useMemo(() => getTimeSeriesData("Deposit Growth"), [sectorOverview]);
+  const gpmData = useMemo(() => getTimeSeriesData("GPM"), [sectorOverview]);
+  const sgaData = useMemo(() => getTimeSeriesData("SG&A Margin"), [sectorOverview]);
+  const opmData = useMemo(() => getTimeSeriesData("OPM"), [sectorOverview]);
+  const parentMarginData = useMemo(() => getTimeSeriesData("Parent Profit Margin"), [sectorOverview]);
+  const parentProfitAbsData = useMemo(() => getTimeSeriesData("Net Profit Parent"), [sectorOverview]);
 
   const topKPIs = useMemo(() => {
     if (selectedTickers.length !== 1 || !sectorOverview) return [];
@@ -524,12 +622,24 @@ export default function Home() {
       };
     };
 
+    if (selectedIndustry === "Food & Beverage") {
+      return [
+        getKPI('Net Sales', idx => getVal("Net Sales", idx)),
+        getKPI('Operating Profit', idx => {
+          const op = getVal("Operating Profit", idx);
+          if (op !== 0) return op;
+          return getVal("Gross Profit", idx) - Math.abs(getVal("Selling Expenses", idx)) - Math.abs(getVal("Admin Expenses", idx));
+        }),
+        getKPI('Net Profit', idx => getVal("Net Profit Parent", idx) || getVal("Net Profit", idx))
+      ];
+    }
+
     return [
       getKPI('Net Interest Income', idx => getVal("NII", idx)),
       getKPI('Profit Before Tax', idx => getPBT(idx)),
       getKPI('Net Profit', idx => getVal("Net Profit Parent", idx) || getVal("Net Profit", idx))
     ];
-  }, [selectedTickers, sectorOverview, activePeriodIndex]);
+  }, [selectedTickers, sectorOverview, activePeriodIndex, selectedIndustry]);
 
   // Deep Dive Data Transformations
   const waterfallData = useMemo(() => {
@@ -540,6 +650,40 @@ export default function Home() {
       const item = sectorOverview.metrics[metric]?.find((t: any) => t.ticker === ticker);
       return item ? (item.data[activePeriodIndex] || 0) : 0;
     };
+
+    if (selectedIndustry === "Food & Beverage") {
+      const netSales = getVal("Net Sales");
+      const grossProfit = getVal("Gross Profit");
+      const cogs = Math.abs(getVal("Cost of sales") || (netSales - grossProfit));
+      const sellingExp = Math.abs(getVal("Selling Expenses"));
+      const adminExp = Math.abs(getVal("Admin Expenses"));
+      const sga = sellingExp + adminExp;
+      
+      const pbt = getVal("PBT") || (grossProfit - sga);
+      const netProfit = getVal("Net Profit Parent") || getVal("Net Profit") || pbt;
+
+      const s1 = netSales;
+      const s2 = s1 - cogs;
+      const s3 = s2 - sga;
+      const s4 = pbt;
+      const s5 = netProfit;
+
+      const financialOther = s4 - s3;
+      const taxContribution = s5 - s4;
+
+      const getColor = (val: number) => val >= 0 ? '#2ecc71' : '#e74c3c';
+
+      return [
+        { name: 'Net Sales', value: [0, s1], color: '#2ecc71', val: netSales },
+        { name: 'COGS', value: [s2, s1], color: '#e74c3c', val: -cogs },
+        { name: 'Gross Profit', value: [0, s2], color: '#f39c12', val: s2 },
+        { name: 'SG&A', value: [s3, s2], color: '#e74c3c', val: -sga },
+        { name: 'Fin & Other Net', value: [Math.min(s3, s4), Math.max(s3, s4)], color: getColor(financialOther), val: financialOther },
+        { name: 'PBT', value: [0, s4], color: '#9b59b6', val: s4 },
+        { name: 'Tax', value: [Math.min(s4, s5), Math.max(s4, s5)], color: '#e74c3c', val: taxContribution },
+        { name: 'Net Profit', value: [0, s5], color: '#3498db', val: s5 }
+      ];
+    }
 
     const nii = getVal("NII");
     const netFee = getVal("Net Fee");
@@ -588,7 +732,7 @@ export default function Home() {
       { name: 'Minority Int', value: [s11, s10], color: '#e74c3c', val: -absMi },
       { name: 'Net Profit', value: [0, netProfitParent], color: '#3498db', val: netProfitParent }
     ];
-  }, [selectedTickers, sectorOverview, activePeriodIndex]);
+  }, [selectedTickers, sectorOverview, activePeriodIndex, selectedIndustry]);
 
   const nimTrendData = useMemo(() => {
     if (selectedTickers.length !== 1 || !sectorOverview) return [];
@@ -638,6 +782,89 @@ export default function Home() {
     });
   }, [selectedTickers, sectorOverview]);
 
+  const marginsTrendData = useMemo(() => {
+    if (selectedTickers.length !== 1 || !sectorOverview) return [];
+    const ticker = selectedTickers[0];
+    return sectorOverview.periods.map((p: string, pIdx: number) => {
+      const getVal = (metric: string) => {
+        const item = sectorOverview.metrics[metric]?.find((t: any) => t.ticker === ticker);
+        return item ? (item.data[pIdx] || 0) : 0;
+      };
+      return {
+        period: p,
+        GPM: getVal("GPM"),
+        OPM: getVal("OPM"),
+        NPM: getVal("Parent Profit Margin"),
+        SGA: getVal("SG&A Margin")
+      };
+    });
+  }, [selectedTickers, sectorOverview]);
+
+  const solvencyTrendData = useMemo(() => {
+    if (selectedTickers.length !== 1 || !sectorOverview) return [];
+    const ticker = selectedTickers[0];
+    return sectorOverview.periods.map((p: string, pIdx: number) => {
+      const getVal = (metric: string) => {
+        const item = sectorOverview.metrics[metric]?.find((t: any) => t.ticker === ticker);
+        return item ? (item.data[pIdx] || 0) : 0;
+      };
+      const st = getVal("ShortTermDebt");
+      const lt = getVal("LongTermDebt");
+      const eq = getVal("Equity");
+      const de = eq > 0 ? ((st + lt) / eq) * 100 : 0;
+      return {
+        period: p,
+        DE: parseFloat(de.toFixed(2)),
+        InterestExpense: getVal("Interest Expense")
+      };
+    });
+  }, [selectedTickers, sectorOverview]);
+
+  const workingCapitalTrendData = useMemo(() => {
+    if (selectedTickers.length !== 1 || !sectorOverview) return [];
+    const ticker = selectedTickers[0];
+    return sectorOverview.periods.map((p: string, pIdx: number) => {
+      const getVal = (metric: string) => {
+        const item = sectorOverview.metrics[metric]?.find((t: any) => t.ticker === ticker);
+        return item ? (item.data[pIdx] || 0) : 0;
+      };
+      return {
+        period: p,
+        ReceivableDays: getVal("Receivable Days"),
+        InventoryDays: getVal("Inventory Days"),
+        PayableDays: getVal("Payable Days"),
+        CCC: getVal("CCC")
+      };
+    });
+  }, [selectedTickers, sectorOverview]);
+
+  const cashFlowTrendData = useMemo(() => {
+    if (selectedTickers.length !== 1 || !sectorOverview) return [];
+    const ticker = selectedTickers[0];
+    return sectorOverview.periods.map((p: string, pIdx: number) => {
+      const getVal = (metric: string) => {
+        const item = sectorOverview.metrics[metric]?.find((t: any) => t.ticker === ticker);
+        return item ? (item.data[pIdx] || 0) : 0;
+      };
+      return {
+        period: p,
+        CFO: getVal("CFO"),
+        FCFE: getVal("FCFE"),
+        CFI: getVal("CFI"),
+        CFINetCapex: getVal("CFI_NetCapex"),
+        CFINetLoans: getVal("CFI_NetLoans"),
+        CFIOther: getVal("CFI_Other"),
+        CFF: getVal("CFF"),
+        CFFShareIssue: getVal("CFF_ShareIssue"),
+        CFFShareRepurchase: getVal("CFF_ShareRepurchase"),
+        CFFNetBorrowing: getVal("CFF_NetBorrowing"),
+        CFFLease: getVal("CFF_Lease"),
+        CFFDividends: getVal("CFF_Dividends"),
+        CFFOther: getVal("CFF_Other")
+      };
+    });
+  }, [selectedTickers, sectorOverview]);
+
   const yoeaCofTrendData = useMemo(() => {
     if (selectedTickers.length !== 1 || !sectorOverview) return [];
     const ticker = selectedTickers[0];
@@ -665,14 +892,60 @@ export default function Home() {
     if (selectedTickers.length !== 1 || !sectorOverview) return [];
     const ticker = selectedTickers[0];
     return sectorOverview.periods.map((p: string, pIdx: number) => {
+      const getVal = (metric: string, idx: number) => {
+        const item = sectorOverview.metrics[metric]?.find((t: any) => t.ticker === ticker);
+        return item ? (item.data[idx] || 0) : 0;
+      };
+      if (selectedIndustry === "Food & Beverage") {
+        const isQuarterly = p.includes('Q');
+        let yoyIdx = -1;
+        if (isQuarterly) {
+          const match = p.match(/Q(\d+)\s*\/\s*(\d+)/i);
+          if (match) {
+            const q = match[1];
+            const y = parseInt(match[2]);
+            const target = `Q${q}/${y - 1}`;
+            yoyIdx = sectorOverview.periods.findIndex((pr: string) => pr.replace(/\s+/g, '') === target);
+          }
+          if (yoyIdx === -1 && pIdx >= 4) yoyIdx = pIdx - 4;
+        } else {
+          if (pIdx >= 1) yoyIdx = pIdx - 1;
+        }
+        
+        const currSales = getVal("Net Sales", pIdx);
+        const prevSales = yoyIdx !== -1 ? getVal("Net Sales", yoyIdx) : 0;
+        const salesGrowth = prevSales > 0 ? ((currSales - prevSales) / prevSales) * 100 : 0;
+        
+        const currNP = getVal("Net Profit Parent", pIdx) || getVal("Net Profit", pIdx);
+        const prevNP = yoyIdx !== -1 ? (getVal("Net Profit Parent", yoyIdx) || getVal("Net Profit", yoyIdx)) : 0;
+        const npGrowth = prevNP > 0 ? ((currNP - prevNP) / prevNP) * 100 : 0;
+
+        return {
+          period: p,
+          RevenueGrowth: parseFloat(salesGrowth.toFixed(2)),
+          NetProfitGrowth: parseFloat(npGrowth.toFixed(2))
+        };
+      }
+      return {
+        period: p,
+        CreditGrowth: getVal("Credit Growth", pIdx),
+        DepositGrowth: getVal("Deposit Growth", pIdx)
+      };
+    });
+  }, [selectedTickers, sectorOverview, selectedIndustry]);
+
+  const revenueNetProfitAbsData = useMemo(() => {
+    if (selectedTickers.length !== 1 || !sectorOverview) return [];
+    const ticker = selectedTickers[0];
+    return sectorOverview.periods.map((p: string, pIdx: number) => {
       const getVal = (metric: string) => {
         const item = sectorOverview.metrics[metric]?.find((t: any) => t.ticker === ticker);
         return item ? (item.data[pIdx] || 0) : 0;
       };
       return {
         period: p,
-        CreditGrowth: getVal("Credit Growth"),
-        DepositGrowth: getVal("Deposit Growth")
+        Revenue: getVal("Net Sales"),
+        NetProfitParent: getVal("Net Profit Parent") || getVal("Net Profit")
       };
     });
   }, [selectedTickers, sectorOverview]);
@@ -710,6 +983,21 @@ export default function Home() {
       const item = sectorOverview.metrics[metric]?.find((t: any) => t.ticker === ticker);
       return item ? (item.data[idx] || 0) : 0;
     };
+    if (selectedIndustry === "Food & Beverage") {
+      const getDE = (idx: number) => {
+        const st = getVal("ShortTermDebt", idx);
+        const lt = getVal("LongTermDebt", idx);
+        const eq = getVal("Equity", idx);
+        return eq > 0 ? ((st + lt) / eq) * 100 : 0;
+      };
+      const currentDE = getDE(activePeriodIndex);
+      const prevDE = activePeriodIndex > 0 ? getDE(activePeriodIndex - 1) : currentDE;
+      return {
+        current: currentDE,
+        change: currentDE - prevDE,
+        period: sectorOverview.periods[activePeriodIndex]
+      };
+    }
     const currentCAR = getVal("CAR", activePeriodIndex);
     const prevCAR = activePeriodIndex > 0 ? getVal("CAR", activePeriodIndex - 1) : currentCAR;
     return { 
@@ -717,7 +1005,7 @@ export default function Home() {
       change: currentCAR - prevCAR, 
       period: sectorOverview.periods[activePeriodIndex] 
     };
-  }, [selectedTickers, sectorOverview, activePeriodIndex]);
+  }, [selectedTickers, sectorOverview, activePeriodIndex, selectedIndustry]);
 
   const donutData = useMemo(() => {
     if (selectedTickers.length !== 1 || !sectorOverview) return { assets: [], funding: [], totalAssets: 0 };
@@ -726,6 +1014,37 @@ export default function Home() {
       const item = sectorOverview.metrics[metric]?.find((t: any) => t.ticker === ticker);
       return item ? (item.data[activePeriodIndex] || 0) : 0;
     };
+    
+    if (selectedIndustry === "Food & Beverage") {
+      const cash = getVal("Cash");
+      const rec = getVal("Receivables");
+      const inv = getVal("Inventories");
+      const fa = getVal("Fixed Assets");
+      const totalAssets = getVal("Assets");
+      const otherAssets = Math.max(0, totalAssets - cash - rec - inv - fa);
+
+      const assets = [
+        { name: 'Cash & Equivalents', value: cash, fill: '#2ecc71' },
+        { name: 'Accounts Receivables', value: rec, fill: '#3498db' },
+        { name: 'Inventories', value: inv, fill: '#e67e22' },
+        { name: 'Fixed Assets', value: fa, fill: '#9b59b6' },
+        { name: 'Other Assets', value: otherAssets, fill: '#95a5a6' }
+      ].filter(d => d.value > 0);
+
+      const stDebt = getVal("ShortTermDebt");
+      const ltDebt = getVal("LongTermDebt");
+      const equity = getVal("Equity");
+      const otherLiab = Math.max(0, totalAssets - equity - stDebt - ltDebt);
+
+      const funding = [
+        { name: 'Short-term Debt', value: stDebt, fill: '#e74c3c' },
+        { name: 'Long-term Debt', value: ltDebt, fill: '#c0392b' },
+        { name: 'Other Liabilities', value: otherLiab, fill: '#95a5a6' },
+        { name: 'Owner\'s Equity', value: equity, fill: '#f1c40f' }
+      ].filter(d => d.value > 0);
+
+      return { assets, funding, totalAssets };
+    }
     
     const loans = getVal("Loans");
     const ibAssets = getVal("Interbank Assets");
@@ -756,10 +1075,25 @@ export default function Home() {
     ].filter(d => d.value > 0);
     
     return { assets, funding, totalAssets };
-  }, [selectedTickers, sectorOverview, activePeriodIndex]);
+  }, [selectedTickers, sectorOverview, activePeriodIndex, selectedIndustry]);
 
-  const displayTickers = stocks.map(s => s.ticker).slice(0, 7);
-  const colors = ["#4a86e8", "#e74c3c", "#f39c12", "#1abc9c", "#9b59b6", "#34495e", "#d4b58e"];
+  const displayTickers = stocks.map(s => s.ticker);
+  const colors = [
+    "#4a86e8", "#e74c3c", "#f39c12", "#1abc9c", "#9b59b6", 
+    "#34495e", "#d4b58e", "#2ecc71", "#e67e22", "#8e44ad", 
+    "#16a085", "#27ae60", "#2980b9", "#f1c40f", "#d35400"
+  ];
+
+  const sortedParentProfitTickers = useMemo(() => {
+    if (!parentProfitAbsData || parentProfitAbsData.length === 0) return displayTickers;
+    const latestData = parentProfitAbsData[parentProfitAbsData.length - 1];
+    if (!latestData) return displayTickers;
+    return [...displayTickers].sort((a, b) => {
+      const valA = latestData[a] || 0;
+      const valB = latestData[b] || 0;
+      return valB - valA;
+    });
+  }, [displayTickers, parentProfitAbsData]);
 
   const filteredStocks = stocks.filter(s => s.ticker.toLowerCase().includes(searchTerm.toLowerCase()));
 
@@ -812,8 +1146,77 @@ export default function Home() {
   };
 
 
+  // Dynamic progress calculation logic
+  const isDeepDive = selectedTickers.length === 1;
+  const activeLoadingCount = (isDeepDive ? 
+    ((valuationLoading ? 1 : 0) + (historyLoading ? 1 : 0)) : 
+    ((stocksLoading ? 1 : 0) + (sectorOverviewLoading ? 1 : 0) + (sectorValuationLoading ? 1 : 0))
+  );
+  const totalLoadingTasks = isDeepDive ? 2 : 3;
+  const completedTasks = totalLoadingTasks - activeLoadingCount;
+  const isCurrentlyLoading = activeLoadingCount > 0;
+  const loadingProgress = isCurrentlyLoading ? Math.round((completedTasks / totalLoadingTasks) * 100) : 100;
+
+  let loadingMessage = "Processing data...";
+  if (isDeepDive) {
+    if (valuationLoading && historyLoading) {
+      loadingMessage = "Loading valuation & historical data...";
+    } else if (valuationLoading) {
+      loadingMessage = "Analyzing detailed valuation...";
+    } else if (historyLoading) {
+      loadingMessage = "Loading historical price & volume...";
+    }
+  } else {
+    if (stocksLoading && sectorOverviewLoading) {
+      loadingMessage = "Loading stocks list & sector data...";
+    } else if (stocksLoading) {
+      loadingMessage = "Synchronizing stocks list...";
+    } else if (sectorOverviewLoading) {
+      loadingMessage = "Analyzing sector financial metrics...";
+    } else if (sectorValuationLoading) {
+      loadingMessage = "Running sector valuation model...";
+    }
+  }
+
   return (
     <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: 'var(--bg-main)' }}>
+      {/* Top Edge Progress Bar */}
+      {isCurrentlyLoading && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: `${loadingProgress}%`,
+          height: '4px',
+          background: 'linear-gradient(90deg, var(--accent-color) 0%, #3498db 50%, var(--accent-color) 100%)',
+          zIndex: 9999,
+          transition: 'width 0.3s ease',
+          boxShadow: '0 0 8px var(--accent-color)'
+        }} />
+      )}
+
+      {/* Glassmorphic Bottom Loading Toast */}
+      {isCurrentlyLoading && (
+        <div className="card glass animate-fade-in" style={{
+          position: 'fixed',
+          bottom: '24px',
+          right: '24px',
+          zIndex: 9999,
+          padding: '12px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          border: '1px solid var(--border-color)',
+          boxShadow: '0 8px 30px rgba(0,0,0,0.15)',
+          borderRadius: '12px'
+        }}>
+          <RefreshCw className="animate-spin" size={18} color="var(--accent-color)" />
+          <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--text-main)' }}>
+            {loadingMessage} ({loadingProgress}%)
+          </span>
+        </div>
+      )}
+
       {/* Toast Notification */}
       {(error || successMsg) && (
         <div style={{ position: 'fixed', top: '24px', right: '24px', zIndex: 1000, display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -913,6 +1316,14 @@ export default function Home() {
               {uploading ? 'Processing Data...' : 'Start Secure Import'}
               {!uploading && <ChevronRight size={24} />}
             </button>
+          </div>
+        ) : (!sectorOverview && sectorOverviewLoading) ? (
+          <div className="card glass animate-fade-in" style={{ maxWidth: '600px', margin: '80px auto', textAlign: 'center', padding: '60px 40px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px' }}>
+            <RefreshCw className="animate-spin" size={48} color="var(--accent-color)" />
+            <div>
+              <h2 style={{ marginBottom: '12px', fontSize: '1.8rem', fontWeight: 700 }}>Loading analytics data...</h2>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '1rem', marginBottom: '0' }}>Please wait a moment while the system extracts and processes sector financial data.</p>
+            </div>
           </div>
         ) : !sectorOverview || !sectorOverview.metrics ? (
           <div className="card animate-fade-in" style={{ maxWidth: '600px', margin: '60px auto', textAlign: 'center', padding: '60px 40px' }}>
@@ -1093,6 +1504,143 @@ export default function Home() {
             {sectorOverview && selectedTickers.length === 0 && (
               <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
                 
+                  {/* Global Stock Filter Selector */}
+                  <div className="card" style={{ 
+                    padding: '16px 20px', 
+                    marginBottom: '24px', 
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 'var(--radius-lg)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px',
+                    boxShadow: 'var(--shadow-sm)'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+                      <span style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Filter size={16} color="var(--accent-color)" /> Filter Stocks:
+                      </span>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button 
+                          onClick={() => {
+                            setHiddenDataKeys({});
+                          }}
+                          style={{
+                            padding: '4px 10px',
+                            fontSize: '0.75rem',
+                            borderRadius: '12px',
+                            border: '1px solid var(--border-color)',
+                            background: 'transparent',
+                            color: 'var(--text-secondary)',
+                            cursor: 'pointer',
+                            fontWeight: 500,
+                            transition: 'all 0.2s ease'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.borderColor = 'var(--accent-color)';
+                            e.currentTarget.style.color = 'var(--accent-color)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.borderColor = 'var(--border-color)';
+                            e.currentTarget.style.color = 'var(--text-secondary)';
+                          }}
+                        >
+                          Show All
+                        </button>
+                        <button 
+                          onClick={() => {
+                            const allHidden: Record<string, boolean> = {};
+                            displayTickers.forEach(t => {
+                              allHidden[t] = true;
+                            });
+                            setHiddenDataKeys(allHidden);
+                          }}
+                          style={{
+                            padding: '4px 10px',
+                            fontSize: '0.75rem',
+                            borderRadius: '12px',
+                            border: '1px solid var(--border-color)',
+                            background: 'transparent',
+                            color: 'var(--text-secondary)',
+                            cursor: 'pointer',
+                            fontWeight: 500,
+                            transition: 'all 0.2s ease'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.borderColor = 'var(--accent-color)';
+                            e.currentTarget.style.color = 'var(--accent-color)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.borderColor = 'var(--border-color)';
+                            e.currentTarget.style.color = 'var(--text-secondary)';
+                          }}
+                        >
+                          Hide All
+                        </button>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                      {displayTickers.map((ticker, idx) => {
+                        const color = colors[idx % colors.length];
+                        const isHidden = hiddenDataKeys[ticker];
+                        return (
+                          <div
+                            key={ticker}
+                            onClick={() => handleLegendClick({ dataKey: ticker })}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              padding: '6px 14px',
+                              borderRadius: '30px',
+                              border: isHidden 
+                                ? '1px solid var(--border-color)' 
+                                : `1px solid ${color}`,
+                              background: isHidden 
+                                ? 'transparent' 
+                                : `rgba(${parseInt(color.slice(1,3), 16)}, ${parseInt(color.slice(3,5), 16)}, ${parseInt(color.slice(5,7), 16)}, 0.08)`,
+                              color: isHidden ? 'var(--text-secondary)' : 'var(--text-primary)',
+                              cursor: 'pointer',
+                              fontWeight: isHidden ? 500 : 600,
+                              fontSize: '0.85rem',
+                              transition: 'all 0.2s ease',
+                              opacity: isHidden ? 0.5 : 1,
+                              textDecoration: isHidden ? 'line-through' : 'none',
+                              userSelect: 'none'
+                            }}
+                            onMouseEnter={(e) => {
+                              if (isHidden) {
+                                e.currentTarget.style.borderColor = color;
+                                e.currentTarget.style.background = `rgba(${parseInt(color.slice(1,3), 16)}, ${parseInt(color.slice(3,5), 16)}, ${parseInt(color.slice(5,7), 16)}, 0.03)`;
+                                e.currentTarget.style.opacity = '0.8';
+                              } else {
+                                e.currentTarget.style.opacity = '0.85';
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              if (isHidden) {
+                                e.currentTarget.style.borderColor = 'var(--border-color)';
+                                e.currentTarget.style.background = 'transparent';
+                                e.currentTarget.style.opacity = '0.5';
+                              } else {
+                                e.currentTarget.style.opacity = '1';
+                              }
+                            }}
+                          >
+                            <span style={{ 
+                              width: '8px', 
+                              height: '8px', 
+                              borderRadius: '50%', 
+                              background: isHidden ? 'var(--text-secondary)' : color,
+                              display: 'inline-block'
+                            }} />
+                            {ticker}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
                 {/* Module 0: Valuation (P/E vs EPS Growth, P/B vs ROE) */}
                 <section>
                   <h3 style={{ fontSize: '1.6rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -1114,7 +1662,7 @@ export default function Home() {
                             <ScatterChart margin={{ top: 30, right: 80, bottom: 20, left: 10 }}>
                               <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
                               <XAxis type="number" dataKey="eps_growth" name="EPS Growth" unit="%" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} label={{ value: 'EPS Growth (%)', position: 'insideBottom', offset: -5, fill: 'var(--text-secondary)', fontSize: 11 }} />
-                              <YAxis type="number" dataKey="pe" name="P/E" unit="x" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} domain={[0, 'dataMax + 4']} label={{ value: 'P/E (x)', angle: -90, position: 'insideLeft', fill: 'var(--text-secondary)', fontSize: 11 }} />
+                              <YAxis type="number" dataKey="pe" name="P/E" tickFormatter={(v) => v + 'x'} tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} domain={[0, 'dataMax + 4']} label={{ value: 'P/E (x)', angle: -90, position: 'insideLeft', fill: 'var(--text-secondary)', fontSize: 11 }} />
                               <ZAxis type="number" dataKey="market_cap" range={[80, 500]} name="Market Cap" unit="B VND" />
                               <Tooltip cursor={{ strokeDasharray: '3 3' }} content={<CustomBubbleTooltip />} />
                               {valuationAnalysis && valuationAnalysis.avgPE !== null && (
@@ -1123,8 +1671,8 @@ export default function Home() {
                               {valuationAnalysis && valuationAnalysis.avgEPSGrowth !== null && (
                                 <ReferenceLine x={valuationAnalysis.avgEPSGrowth} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ value: `Avg Growth: ${valuationAnalysis.avgEPSGrowth.toFixed(1)}%`, fill: '#e74c3c', fontSize: 10, fontWeight: 600, position: 'top' }} />
                               )}
-                              <Scatter name="Stock" data={sectorValuation.map(item => ({...item, market_cap_bil: item.market_cap / 1e9}))}>
-                                {sectorValuation.map((entry, index) => (
+                              <Scatter name="Stock" data={sectorValuation.filter(item => !hiddenDataKeys[item.ticker]).map(item => ({...item, market_cap_bil: item.market_cap / 1e9}))}>
+                                {sectorValuation.filter(item => !hiddenDataKeys[item.ticker]).map((entry, index) => (
                                   <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
                                 ))}
                                 <LabelList dataKey="ticker" position="top" style={{ fill: 'var(--text-main)', fontSize: 11, fontWeight: 700 }} />
@@ -1148,7 +1696,7 @@ export default function Home() {
                             <ScatterChart margin={{ top: 30, right: 80, bottom: 20, left: 10 }}>
                               <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
                               <XAxis type="number" dataKey="roe" name="ROE" unit="%" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} label={{ value: 'ROE (%)', position: 'insideBottom', offset: -5, fill: 'var(--text-secondary)', fontSize: 11 }} />
-                              <YAxis type="number" dataKey="pb" name="P/B" unit="x" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} domain={[0, 'dataMax + 0.5']} label={{ value: 'P/B (x)', angle: -90, position: 'insideLeft', fill: 'var(--text-secondary)', fontSize: 11 }} />
+                              <YAxis type="number" dataKey="pb" name="P/B" tickFormatter={(v) => v + 'x'} tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} domain={[0, 'dataMax + 0.5']} label={{ value: 'P/B (x)', angle: -90, position: 'insideLeft', fill: 'var(--text-secondary)', fontSize: 11 }} />
                               <ZAxis type="number" dataKey="market_cap" range={[80, 500]} name="Market Cap" unit="B VND" />
                               <Tooltip cursor={{ strokeDasharray: '3 3' }} content={<CustomBubbleTooltip />} />
                               {valuationAnalysis && valuationAnalysis.avgPB !== null && (
@@ -1157,8 +1705,8 @@ export default function Home() {
                               {valuationAnalysis && valuationAnalysis.avgROE !== null && (
                                 <ReferenceLine x={valuationAnalysis.avgROE} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ value: `Avg ROE: ${valuationAnalysis.avgROE.toFixed(1)}%`, fill: '#e74c3c', fontSize: 10, fontWeight: 600, position: 'top' }} />
                               )}
-                              <Scatter name="Stock" data={sectorValuation.map(item => ({...item, market_cap_bil: item.market_cap / 1e9}))}>
-                                {sectorValuation.map((entry, index) => (
+                              <Scatter name="Stock" data={sectorValuation.filter(item => !hiddenDataKeys[item.ticker]).map(item => ({...item, market_cap_bil: item.market_cap / 1e9}))}>
+                                {sectorValuation.filter(item => !hiddenDataKeys[item.ticker]).map((entry, index) => (
                                   <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
                                 ))}
                                 <LabelList dataKey="ticker" position="top" style={{ fill: 'var(--text-main)', fontSize: 11, fontWeight: 700 }} />
@@ -1180,12 +1728,12 @@ export default function Home() {
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
                       <div className="card">
                       <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>Net Interest Margin (NIM) % - {sectorOverview.periods[activePeriodIndex]}</h4>
-                      <div style={{ width: '100%', height: 300 }}>
+                      <div style={{ width: '100%', height: Math.max(300, nimSorted.length * 35) }}>
                         <ResponsiveContainer>
                           <BarChart layout="vertical" data={nimSorted} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" horizontal={false} />
                             <XAxis type="number" tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} />
-                            <YAxis dataKey="name" type="category" tick={{ fill: 'var(--text-main)', fontWeight: 600 }} axisLine={false} tickLine={false} />
+                            <YAxis dataKey="name" type="category" interval={0} tick={{ fill: 'var(--text-main)', fontWeight: 600 }} axisLine={false} tickLine={false} />
                             <Tooltip cursor={{fill: 'var(--bg-main)'}} content={<CustomTooltip />} />
                             <Bar dataKey="NIM" fill="#4a86e8" radius={[0, 4, 4, 0]} barSize={24} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
                           </BarChart>
@@ -1202,9 +1750,9 @@ export default function Home() {
                             <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dy={10} padding={{ left: 20, right: 20 }} />
                             <YAxis tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dx={-10} tickFormatter={(v) => v + '%'} />
                             <Tooltip content={<CustomTooltip />} />
-                            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} onClick={handleLegendClick} formatter={renderLegendText} />
                             {displayTickers.map((t, i) => (
-                              <Line key={t} type="monotone" dataKey={t} stroke={colors[i % colors.length]} strokeWidth={3} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 5 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                              <Line key={t} type="monotone" dataKey={t} stroke={colors[i % colors.length]} strokeWidth={3} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 5 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" hide={hiddenDataKeys[t]} />
                             ))}
                           </LineChart>
                         </ResponsiveContainer>
@@ -1217,12 +1765,12 @@ export default function Home() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                     <div className="card">
                       <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>Return on Assets (ROA) % - {sectorOverview.periods[activePeriodIndex]}</h4>
-                      <div style={{ width: '100%', height: 300 }}>
+                      <div style={{ width: '100%', height: Math.max(300, roaSorted.length * 35) }}>
                         <ResponsiveContainer>
                           <BarChart layout="vertical" data={roaSorted} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" horizontal={false} />
                             <XAxis type="number" tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} />
-                            <YAxis dataKey="name" type="category" tick={{ fill: 'var(--text-main)', fontWeight: 600 }} axisLine={false} tickLine={false} />
+                            <YAxis dataKey="name" type="category" interval={0} tick={{ fill: 'var(--text-main)', fontWeight: 600 }} axisLine={false} tickLine={false} />
                             <Tooltip cursor={{fill: 'var(--bg-main)'}} content={<CustomTooltip />} />
                             <Bar dataKey="ROA" fill="#f39c12" radius={[0, 4, 4, 0]} barSize={24} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
                           </BarChart>
@@ -1232,12 +1780,12 @@ export default function Home() {
 
                     <div className="card">
                       <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>Return on Equity (ROE) % - {sectorOverview.periods[activePeriodIndex]}</h4>
-                      <div style={{ width: '100%', height: 300 }}>
+                      <div style={{ width: '100%', height: Math.max(300, roeSorted.length * 35) }}>
                         <ResponsiveContainer>
                           <BarChart layout="vertical" data={roeSorted} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" horizontal={false} />
                             <XAxis type="number" tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} />
-                            <YAxis dataKey="name" type="category" tick={{ fill: 'var(--text-main)', fontWeight: 600 }} axisLine={false} tickLine={false} />
+                            <YAxis dataKey="name" type="category" interval={0} tick={{ fill: 'var(--text-main)', fontWeight: 600 }} axisLine={false} tickLine={false} />
                             <Tooltip cursor={{fill: 'var(--bg-main)'}} content={<CustomTooltip />} />
                             <Bar dataKey="ROE" fill="#e74c3c" radius={[0, 4, 4, 0]} barSize={24} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
                           </BarChart>
@@ -1263,9 +1811,9 @@ export default function Home() {
                             <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dy={10} padding={{ left: 20, right: 20 }} />
                             <YAxis domain={[0, 100]} tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dx={-10} tickFormatter={(v) => v + '%'} />
                             <Tooltip content={<CustomTooltip />} />
-                            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} onClick={handleLegendClick} formatter={renderLegendText} />
                             {displayTickers.map((t, i) => (
-                              <Line key={t} type="monotone" dataKey={t} stroke={colors[i % colors.length]} strokeWidth={3} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 5 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                              <Line key={t} type="monotone" dataKey={t} stroke={colors[i % colors.length]} strokeWidth={3} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 5 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" hide={hiddenDataKeys[t]} />
                             ))}
                           </LineChart>
                         </ResponsiveContainer>
@@ -1281,9 +1829,9 @@ export default function Home() {
                             <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dy={10} padding={{ left: 20, right: 20 }} />
                             <YAxis domain={[0, 'auto']} tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dx={-10} tickFormatter={(v) => v + '%'} />
                             <Tooltip content={<CustomTooltip />} />
-                            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} onClick={handleLegendClick} formatter={renderLegendText} />
                             {displayTickers.map((t, i) => (
-                              <Line key={t} type="monotone" dataKey={t} stroke={colors[i % colors.length]} strokeWidth={3} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 5 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                              <Line key={t} type="monotone" dataKey={t} stroke={colors[i % colors.length]} strokeWidth={3} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 5 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" hide={hiddenDataKeys[t]} />
                             ))}
                           </LineChart>
                         </ResponsiveContainer>
@@ -1308,9 +1856,9 @@ export default function Home() {
                             <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dy={10} padding={{ left: 20, right: 20 }} />
                             <YAxis tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dx={-10} tickFormatter={(v) => v + '%'} />
                             <Tooltip content={<CustomTooltip />} />
-                            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} onClick={handleLegendClick} formatter={renderLegendText} />
                             {displayTickers.map((t, i) => (
-                              <Line key={t} type="monotone" dataKey={t} stroke={colors[i % colors.length]} strokeWidth={3} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 5 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                              <Line key={t} type="monotone" dataKey={t} stroke={colors[i % colors.length]} strokeWidth={3} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 5 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" hide={hiddenDataKeys[t]} />
                             ))}
                           </LineChart>
                         </ResponsiveContainer>
@@ -1326,9 +1874,9 @@ export default function Home() {
                             <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dy={10} padding={{ left: 20, right: 20 }} />
                             <YAxis tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dx={-10} tickFormatter={(v) => v + '%'} />
                             <Tooltip content={<CustomTooltip />} />
-                            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} onClick={handleLegendClick} formatter={renderLegendText} />
                             {displayTickers.map((t, i) => (
-                              <Line key={t} type="monotone" dataKey={t} stroke={colors[i % colors.length]} strokeWidth={3} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 5 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                              <Line key={t} type="monotone" dataKey={t} stroke={colors[i % colors.length]} strokeWidth={3} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 5 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" hide={hiddenDataKeys[t]} />
                             ))}
                           </LineChart>
                         </ResponsiveContainer>
@@ -1345,12 +1893,12 @@ export default function Home() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
                     <div className="card">
                       <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>Non-Performing Loan (NPL) % - {sectorOverview.periods[activePeriodIndex]}</h4>
-                      <div style={{ width: '100%', height: 300 }}>
+                      <div style={{ width: '100%', height: Math.max(300, nplSorted.length * 35) }}>
                         <ResponsiveContainer>
                           <BarChart layout="vertical" data={nplSorted} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" horizontal={false} />
                             <XAxis type="number" tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} />
-                            <YAxis dataKey="name" type="category" tick={{ fill: 'var(--text-main)', fontWeight: 600 }} axisLine={false} tickLine={false} />
+                            <YAxis dataKey="name" type="category" interval={0} tick={{ fill: 'var(--text-main)', fontWeight: 600 }} axisLine={false} tickLine={false} />
                             <Tooltip cursor={{fill: 'var(--bg-main)'}} content={<CustomTooltip />} />
                             <Bar dataKey="NPL" radius={[0, 4, 4, 0]} barSize={24} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out">
                               {nplSorted.map((entry, index) => (
@@ -1364,12 +1912,12 @@ export default function Home() {
 
                     <div className="card">
                       <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>Loan Loss Reserve (LLR) % - {sectorOverview.periods[activePeriodIndex]}</h4>
-                      <div style={{ width: '100%', height: 300 }}>
+                      <div style={{ width: '100%', height: Math.max(300, llrSorted.length * 35) }}>
                         <ResponsiveContainer>
                           <BarChart layout="vertical" data={llrSorted} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" horizontal={false} />
                             <XAxis type="number" tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} />
-                            <YAxis dataKey="name" type="category" tick={{ fill: 'var(--text-main)', fontWeight: 600 }} axisLine={false} tickLine={false} />
+                            <YAxis dataKey="name" type="category" interval={0} tick={{ fill: 'var(--text-main)', fontWeight: 600 }} axisLine={false} tickLine={false} />
                             <Tooltip cursor={{fill: 'var(--bg-main)'}} content={<CustomTooltip />} />
                             <Bar dataKey="LLR" fill="#e67e22" radius={[0, 4, 4, 0]} barSize={24} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
                           </BarChart>
@@ -1387,12 +1935,12 @@ export default function Home() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                     <div className="card">
                       <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>Capital Adequacy Ratio (CAR) % - {sectorOverview.periods[activePeriodIndex]}</h4>
-                      <div style={{ width: '100%', height: 350 }}>
+                      <div style={{ width: '100%', height: Math.max(350, carSorted.length * 35) }}>
                         <ResponsiveContainer>
                           <BarChart layout="vertical" data={carSorted} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" horizontal={false} />
                             <XAxis type="number" tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} domain={[0, 'dataMax + 2']} />
-                            <YAxis dataKey="name" type="category" tick={{ fill: 'var(--text-main)', fontWeight: 600 }} axisLine={false} tickLine={false} />
+                            <YAxis dataKey="name" type="category" interval={0} tick={{ fill: 'var(--text-main)', fontWeight: 600 }} axisLine={false} tickLine={false} />
                             <Tooltip cursor={{fill: 'var(--bg-main)'}} content={<CustomTooltip />} />
                             <ReferenceLine x={8} stroke="#e74c3c" strokeDasharray="3 3" label={{ position: 'top', value: 'Basel II (8%)', fill: '#e74c3c', fontSize: 12, fontWeight: 600 }} />
                             <Bar dataKey="CAR" fill="#1abc9c" radius={[0, 4, 4, 0]} barSize={24} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
@@ -1410,9 +1958,175 @@ export default function Home() {
                             <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
                             <YAxis tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dx={-10} domain={['auto', 'auto']} />
                             <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid var(--border-color)' }} />
-                            <Legend iconType="circle" />
+                            <Legend iconType="circle" onClick={handleLegendClick} formatter={renderLegendText} />
                             {displayTickers.map((ticker, i) => (
-                              <Line key={ticker} type="monotone" dataKey={ticker} stroke={colors[i % colors.length]} strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                              <Line key={ticker} type="monotone" dataKey={ticker} stroke={colors[i % colors.length]} strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" hide={hiddenDataKeys[ticker]} />
+                            ))}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+                )}
+
+                {/* Module F&B: Operations & Profitability */}
+                {selectedIndustry === "Food & Beverage" && (
+                <section style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                  {/* Row 1: GPM, SG&A Margin & OPM */}
+                  <h3 style={{ fontSize: '1.6rem', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '12px', marginTop: '24px' }}>
+                    <Activity color="var(--accent-color)" /> F&B Operations & Margins
+                  </h3>
+                  
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '16px', marginBottom: '16px' }}>
+                    <div className="card">
+                      <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>Gross Profit Margin & SG&A Margin (%) - {sectorOverview.periods[activePeriodIndex]}</h4>
+                      <div style={{ width: '100%', height: Math.max(300, gpmSorted.length * 50) }}>
+                        <ResponsiveContainer>
+                          <ComposedChart layout="vertical" data={gpmSorted} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" horizontal={false} />
+                            <XAxis type="number" tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} />
+                            <YAxis dataKey="name" type="category" interval={0} tick={{ fill: 'var(--text-main)', fontWeight: 600 }} axisLine={false} tickLine={false} />
+                            <Tooltip cursor={{fill: 'var(--bg-main)'}} content={<CustomTooltip />} />
+                            <Legend wrapperStyle={{ fontSize: '12px' }} />
+                            <Bar dataKey="GPM" name="Gross Profit Margin" fill="#2ecc71" radius={[0, 4, 4, 0]} barSize={20} isAnimationActive={true} animationDuration={500} />
+                            <Line type="monotone" dataKey="SGAMargin" name="SG&A Margin" stroke="none" dot={{ fill: '#e67e22', r: 6, stroke: '#e67e22', strokeWidth: 2 }} legendType="circle" isAnimationActive={true} animationDuration={500} />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Row 1b: Trends of margins */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+                    <div className="card">
+                      <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>Gross Profit Margin (GPM) Trend (%)</h4>
+                      <div style={{ width: '100%', height: 300 }}>
+                        <ResponsiveContainer>
+                          <LineChart data={gpmData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                            <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dy={10} padding={{ left: 20, right: 20 }} />
+                            <YAxis tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dx={-10} tickFormatter={(v) => v + '%'} />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} onClick={handleLegendClick} formatter={renderLegendText} />
+                            {displayTickers.map((t, i) => (
+                              <Line key={t} type="monotone" dataKey={t} stroke={colors[i % colors.length]} strokeWidth={3} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 5 }} isAnimationActive={true} name={t} hide={hiddenDataKeys[t]} />
+                            ))}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    <div className="card">
+                      <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>SG&A Margin Trend (%)</h4>
+                      <div style={{ width: '100%', height: 300 }}>
+                        <ResponsiveContainer>
+                          <LineChart data={sgaData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                            <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dy={10} padding={{ left: 20, right: 20 }} />
+                            <YAxis tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dx={-10} tickFormatter={(v) => v + '%'} />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} onClick={handleLegendClick} formatter={renderLegendText} />
+                            {displayTickers.map((t, i) => (
+                              <Line key={t} type="monotone" dataKey={t} stroke={colors[i % colors.length]} strokeWidth={3} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 5 }} isAnimationActive={true} name={t} hide={hiddenDataKeys[t]} />
+                            ))}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    <div className="card">
+                      <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>Operating Profit Margin (OPM) Trend (%)</h4>
+                      <div style={{ width: '100%', height: 300 }}>
+                        <ResponsiveContainer>
+                          <LineChart data={opmData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                            <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dy={10} padding={{ left: 20, right: 20 }} />
+                            <YAxis tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dx={-10} tickFormatter={(v) => v + '%'} />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} onClick={handleLegendClick} formatter={renderLegendText} />
+                            {displayTickers.map((t, i) => (
+                              <Line key={t} type="monotone" dataKey={t} stroke={colors[i % colors.length]} strokeWidth={3} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 5 }} isAnimationActive={true} name={t} hide={hiddenDataKeys[t]} />
+                            ))}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Row 2: Parent Company Profit & Margins */}
+                  <h3 style={{ fontSize: '1.6rem', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '12px', marginTop: '24px' }}>
+                    <Wallet color="#9b59b6" /> Parent Company Attribution
+                  </h3>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+                    <div className="card">
+                      <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>Attributable to Parent Company (B VND) - {sectorOverview.periods[activePeriodIndex]}</h4>
+                      <div style={{ width: '100%', height: Math.max(300, netProfitParentSorted.length * 35) }}>
+                        <ResponsiveContainer>
+                          <BarChart layout="vertical" data={netProfitParentSorted} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" horizontal={false} />
+                            <XAxis type="number" tickFormatter={(v) => formatNumber(v) + 'B'} tick={{ fill: 'var(--text-secondary)' }} />
+                            <YAxis dataKey="name" type="category" interval={0} tick={{ fill: 'var(--text-main)', fontWeight: 600 }} axisLine={false} tickLine={false} />
+                            <Tooltip cursor={{fill: 'var(--bg-main)'}} content={<CustomTooltip />} />
+                            <Bar dataKey="NetProfitParent" name="Net Profit Parent (B VND)" fill="#9b59b6" radius={[0, 4, 4, 0]} barSize={24} isAnimationActive={true} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    <div className="card">
+                      <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>Net Profit Margin of Parent Company (%) - {sectorOverview.periods[activePeriodIndex]}</h4>
+                      <div style={{ width: '100%', height: Math.max(300, parentProfitMarginSorted.length * 35) }}>
+                        <ResponsiveContainer>
+                          <BarChart layout="vertical" data={parentProfitMarginSorted} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" horizontal={false} />
+                            <XAxis type="number" tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} />
+                            <YAxis dataKey="name" type="category" interval={0} tick={{ fill: 'var(--text-main)', fontWeight: 600 }} axisLine={false} tickLine={false} />
+                            <Tooltip cursor={{fill: 'var(--bg-main)'}} content={<CustomTooltip />} />
+                            <Bar dataKey="ParentProfitMargin" name="Parent Profit Margin" fill="#e74c3c" radius={[0, 4, 4, 0]} barSize={24} isAnimationActive={true} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Row 3: Trends of margins */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                    <div className="card">
+                      <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>Attributable to Parent Company Trend (B VND)</h4>
+                      <div style={{ width: '100%', height: 300 }}>
+                        <ResponsiveContainer>
+                          <BarChart data={parentProfitAbsData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                            <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dy={10} />
+                            <YAxis tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dx={-10} tickFormatter={(v) => formatNumber(v) + 'B'} />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} onClick={handleLegendClick} formatter={renderLegendText} />
+                            {sortedParentProfitTickers.map((t) => {
+                              const originalIndex = displayTickers.indexOf(t);
+                              const color = colors[originalIndex !== -1 ? originalIndex : 0];
+                              return (
+                                <Bar key={t} dataKey={t} fill={color} radius={[4, 4, 0, 0]} isAnimationActive={true} name={t} hide={hiddenDataKeys[t]} />
+                              );
+                            })}
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    <div className="card">
+                      <h4 style={{ fontSize: '1.1rem', marginBottom: '16px', color: 'var(--text-secondary)' }}>Parent Profit Margin Trend (%)</h4>
+                      <div style={{ width: '100%', height: 300 }}>
+                        <ResponsiveContainer>
+                          <LineChart data={parentMarginData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                            <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dy={10} padding={{ left: 20, right: 20 }} />
+                            <YAxis tick={{ fill: 'var(--text-secondary)', fontSize: 10 }} axisLine={false} tickLine={false} dx={-10} tickFormatter={(v) => v + '%'} />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} onClick={handleLegendClick} formatter={renderLegendText} />
+                            {displayTickers.map((t, i) => (
+                              <Line key={t} type="monotone" dataKey={t} stroke={colors[i % colors.length]} strokeWidth={3} dot={{ r: 3, strokeWidth: 2 }} activeDot={{ r: 5 }} isAnimationActive={true} name={t} hide={hiddenDataKeys[t]} />
                             ))}
                           </LineChart>
                         </ResponsiveContainer>
@@ -1431,7 +2145,14 @@ export default function Home() {
 
                 {/* Dòng -1: Stock Valuation (P/E, P/B) */}
                 {(valuation || valuationLoading) && (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {valuation?.error && (
+                      <div style={{ padding: '12px 16px', background: 'rgba(231,76,60,0.1)', border: '1px solid rgba(231,76,60,0.3)', borderRadius: '8px', color: '#e74c3c', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <AlertCircle size={16} />
+                        <span>Error loading stock valuation: {valuation.error}</span>
+                      </div>
+                    )}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '10px' }}>
                     {/* Price */}
                     <div className="card" style={{ padding: '20px', background: 'linear-gradient(135deg, rgba(74,134,232,0.15) 0%, rgba(74,134,232,0.05) 100%)', border: '1px solid rgba(74,134,232,0.3)', position: 'relative', overflow: 'hidden' }}>
                       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '3px', background: 'linear-gradient(90deg, #4a86e8, #9b59b6)' }} />
@@ -1482,9 +2203,134 @@ export default function Home() {
                       <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>Price / BVPS</div>
                     </div>
                   </div>
+                </div>
+              )}
+
+                {/* Row -0.5: Historical Price & Volume Chart */}
+                {selectedTickers.length === 1 && (
+                  <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+                      <h3 style={{ fontSize: '1.4rem', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <TrendingUp color="var(--accent-color)" /> Historical Price & Volume Trend
+                      </h3>
+                      <div style={{ 
+                        display: 'flex', 
+                        gap: '4px', 
+                        background: 'rgba(201, 176, 144, 0.08)', 
+                        padding: '4px', 
+                        borderRadius: '30px', 
+                        border: '1px solid rgba(201, 176, 144, 0.15)' 
+                      }}>
+                        {["1M", "3M", "5M", "YTD", "1Y", "3Y", "5Y", "ALL"].map((r) => (
+                          <button
+                            key={r}
+                            onClick={() => setHistoryRange(r)}
+                            style={{
+                              padding: '6px 12px',
+                              borderRadius: '20px',
+                              border: 'none',
+                              background: historyRange === r ? 'var(--accent-color)' : 'transparent',
+                              color: historyRange === r ? '#ffffff' : 'var(--text-secondary)',
+                              fontSize: '0.8rem',
+                              fontWeight: historyRange === r ? 600 : 500,
+                              cursor: 'pointer',
+                              transition: 'all 0.2s ease',
+                            }}
+                          >
+                            {r}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {historyLoading && historyData.length === 0 ? (
+                      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 350, color: 'var(--text-secondary)' }}>
+                        <div className="animate-pulse">Loading historical data from vnstock...</div>
+                      </div>
+                    ) : historyData.length === 0 ? (
+                      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 350, color: 'var(--text-secondary)' }}>
+                        No historical data available for this range
+                      </div>
+                    ) : (
+                      <div style={{ width: '100%', height: 350, minHeight: 350 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <ComposedChart data={historyData} margin={{ top: 10, right: 10, bottom: 5, left: 10 }}>
+                            <defs>
+                              <linearGradient id="colorClose" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="var(--accent-color)" stopOpacity={0.3}/>
+                                <stop offset="95%" stopColor="var(--accent-color)" stopOpacity={0.0}/>
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                            <XAxis 
+                              dataKey="time" 
+                              tick={{ fill: 'var(--text-secondary)', fontSize: '0.75rem' }} 
+                              axisLine={false} 
+                              tickLine={false} 
+                              dy={10} 
+                            />
+                            <YAxis 
+                              yAxisId="price" 
+                              tickFormatter={(v) => new Intl.NumberFormat('en-US').format(v)}
+                              tick={{ fill: 'var(--text-primary)', fontSize: '0.75rem' }} 
+                              axisLine={false} 
+                              tickLine={false} 
+                              domain={['auto', 'auto']}
+                              dx={-10}
+                            />
+                            <YAxis 
+                              yAxisId="volume" 
+                              orientation="right" 
+                              tickFormatter={(v) => v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : v >= 1e3 ? (v / 1e3).toFixed(0) + 'K' : v}
+                              tick={{ fill: 'var(--text-secondary)', fontSize: '0.75rem' }} 
+                              axisLine={false} 
+                              tickLine={false} 
+                              dx={10}
+                            />
+                            <Tooltip 
+                              contentStyle={{ 
+                                backgroundColor: 'var(--bg-surface)', 
+                                borderColor: 'var(--border-color)', 
+                                borderRadius: 'var(--radius-md)',
+                                boxShadow: 'var(--shadow-md)'
+                              }}
+                              labelStyle={{ color: 'var(--text-primary)', fontWeight: 'bold' }}
+                              formatter={(value: any, name: any) => {
+                                if (name === "Closing Price") return [new Intl.NumberFormat('en-US').format(value) + " VND", name];
+                                return [new Intl.NumberFormat('en-US').format(value), "Volume"];
+                              }}
+                            />
+                            <Legend verticalAlign="top" height={36} iconType="circle" />
+                            <Area 
+                              yAxisId="price"
+                              type="monotone" 
+                              dataKey="close" 
+                              name="Closing Price" 
+                              stroke="var(--accent-color)" 
+                              strokeWidth={2.5}
+                              fill="url(#colorClose)" 
+                              isAnimationActive={true} 
+                              animationDuration={400} 
+                            />
+                            <Bar 
+                              yAxisId="volume"
+                              dataKey="volume" 
+                              name="Volume" 
+                              fill="rgba(52, 152, 219, 0.2)" 
+                              barSize={15}
+                              radius={[2, 2, 0, 0]}
+                              isAnimationActive={true} 
+                              animationDuration={400} 
+                            />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 {/* Dòng 0: Top KPIs */}
+
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
 
                   {topKPIs.map((kpi, idx) => (
@@ -1552,123 +2398,295 @@ export default function Home() {
                 </div>
 
 
-                {/* Row 2: NIM Trend & Funding & Costs (YOEA vs COF) */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-                  <div className="card">
-                    <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <Wallet color="#3498db" /> NIM Trend (Profitability)
-                    </h3>
-                    <div style={{ width: '100%', height: 300 }}>
-                      <ResponsiveContainer>
-                        <ComposedChart data={nimTrendData} margin={{ top: 20, right: 20, bottom: 5, left: 20 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
-                          <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
-                          <YAxis yAxisId="left" tickFormatter={(v) => v >= 1000 ? v/1000 + 'k' : v} tick={{ fill: '#3498db' }} axisLine={false} tickLine={false} />
-                          <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v + '%'} tick={{ fill: '#f39c12' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
-                          <Tooltip content={<CustomTooltip />} />
-                          <Legend />
-                          <Bar yAxisId="left" dataKey="NII" name="Net Interest Income" fill="#3498db" radius={[4, 4, 0, 0]} barSize={32} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                          <Line yAxisId="right" type="monotone" dataKey="NIM" name="NIM (%)" stroke="#f39c12" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                        </ComposedChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
+                {/* Row 2 & Row 2.1: Industry-Specific Layouts (Margins, Solvency, Revenue, Working Capital, NIM, LDR, etc.) */}
+                {selectedIndustry === "Food & Beverage" ? (
+                  <>
+                    {/* Row 2.0 (F&B): Revenue & Net Profit and Margins Trend */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+                      {/* Left: Revenue & Net Profit */}
+                      <div className="card">
+                        <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <BarChart3 color="#1abc9c" /> Revenue & Net Profit (B VND)
+                        </h3>
+                        <div style={{ width: '100%', height: 300 }}>
+                          <ResponsiveContainer>
+                            <BarChart data={revenueNetProfitAbsData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                              <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
+                              <YAxis tickFormatter={(v) => formatNumber(v) + 'B'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
+                              <Tooltip content={<CustomTooltip />} />
+                              <Legend />
+                              <Bar dataKey="Revenue" name="Revenue (Net Sales)" fill="#1abc9c" radius={[4, 4, 0, 0]} barSize={20} isAnimationActive={true} animationDuration={500} />
+                              <Bar dataKey="NetProfitParent" name="Net Profit (MI Excluded)" fill="#3498db" radius={[4, 4, 0, 0]} barSize={20} isAnimationActive={true} animationDuration={500} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
 
-                  <div className="card">
-                    <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <PieChartIcon color="#9b59b6" /> Funding & Costs (YOEA vs COF)
-                    </h3>
-                    <div style={{ width: '100%', height: 300 }}>
-                      <ResponsiveContainer>
-                        <ComposedChart data={yoeaCofSpreadData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                          <defs>
-                            <linearGradient id="colorSpread" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#3498db" stopOpacity={0.25}/>
-                              <stop offset="95%" stopColor="#3498db" stopOpacity={0.05}/>
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
-                          <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
-                          <YAxis tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
-                          <Tooltip content={<CustomTooltip />} />
-                          <Legend />
-                          <Area type="monotone" dataKey="spread" name="Spread" stroke="none" fill="url(#colorSpread)" isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                          <Line type="monotone" dataKey="YOEA" name="YOEA (%)" stroke="#3498db" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                          <Line type="monotone" dataKey="COF" name="COF (%)" stroke="#e74c3c" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                        </ComposedChart>
-                      </ResponsiveContainer>
+                      {/* Right: Margins Trend (Profitability) */}
+                      <div className="card">
+                        <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <Wallet color="#3498db" /> Margins Trend (Profitability)
+                        </h3>
+                        <div style={{ width: '100%', height: 300 }}>
+                          <ResponsiveContainer>
+                            <LineChart data={marginsTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                              <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
+                              <YAxis tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dx={-10} domain={['auto', 'auto']} />
+                              <Tooltip content={<CustomTooltip />} />
+                              <Legend onClick={handleLegendClick} formatter={renderLegendText} />
+                              <Line type="monotone" dataKey="GPM" name="GPM (%)" stroke="#2ecc71" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} hide={hiddenDataKeys["GPM"]} />
+                              <Line type="monotone" dataKey="OPM" name="OPM (%)" stroke="#3498db" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} hide={hiddenDataKeys["OPM"]} />
+                              <Line type="monotone" dataKey="NPM" name="NPM (%)" stroke="#e74c3c" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} hide={hiddenDataKeys["NPM"]} />
+                              <Line type="monotone" dataKey="SGA" name="SG&A (%)" stroke="#e67e22" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} hide={hiddenDataKeys["SGA"]} />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
 
-                {/* Row 2.1: LDR & Growth (Credit vs Deposits) */}
-                <div style={{ display: 'grid', gridTemplateColumns: selectedIndustry === "Banks" ? '1fr 1fr' : '1fr', gap: '16px', marginBottom: '16px' }}>
-                  {selectedIndustry === "Banks" && (
+                    {/* Row 2.1 (F&B): Working Capital & CCC and Solvency & Coverage */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+                      {/* Left: Working Capital & Cash Conversion Cycle */}
+                      <div className="card">
+                        <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <Activity color="var(--accent-color)" /> Working Capital & Cash Conversion Cycle
+                        </h3>
+                        <div style={{ width: '100%', height: 300 }}>
+                          <ResponsiveContainer>
+                            <LineChart data={workingCapitalTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                              <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
+                              <YAxis tickFormatter={(v) => v + ' d'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dx={-10} domain={['auto', 'auto']} />
+                              <Tooltip content={<CustomTooltip />} />
+                              <Legend onClick={handleLegendClick} formatter={renderLegendText} />
+                              <Line type="monotone" dataKey="ReceivableDays" name="Receivable Days (DSO)" stroke="#3498db" strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} hide={hiddenDataKeys["ReceivableDays"]} />
+                              <Line type="monotone" dataKey="InventoryDays" name="Inventory Days (DIO)" stroke="#e67e22" strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} hide={hiddenDataKeys["InventoryDays"]} />
+                              <Line type="monotone" dataKey="PayableDays" name="Payable Days (DPO)" stroke="#e74c3c" strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} hide={hiddenDataKeys["PayableDays"]} />
+                              <Line type="monotone" dataKey="CCC" name="Cash Conversion Cycle (CCC)" stroke="var(--accent-color)" strokeWidth={3.5} strokeDasharray="5 5" dot={{ r: 5 }} activeDot={{ r: 7 }} isAnimationActive={true} animationDuration={500} hide={hiddenDataKeys["CCC"]} />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+
+                      {/* Right: Solvency & Coverage (D/E & Interest Expense) */}
+                      <div className="card">
+                        <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <PieChartIcon color="#9b59b6" /> Solvency & Coverage (D/E & Interest Expense)
+                        </h3>
+                        <div style={{ width: '100%', height: 300 }}>
+                          <ResponsiveContainer>
+                            <ComposedChart data={solvencyTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                              <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
+                              <YAxis yAxisId="left" tickFormatter={(v) => formatNumber(v) + 'B'} tick={{ fill: '#9b59b6' }} axisLine={false} tickLine={false} />
+                              <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v + '%'} tick={{ fill: '#3498db' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
+                              <Tooltip content={<CustomTooltip />} />
+                              <Legend onClick={handleLegendClick} formatter={renderLegendText} />
+                              <Bar yAxisId="left" dataKey="InterestExpense" name="Interest Expense (B)" fill="rgba(155, 89, 182, 0.4)" radius={[4, 4, 0, 0]} barSize={32} isAnimationActive={true} animationDuration={500} hide={hiddenDataKeys["InterestExpense"]} />
+                              <Line yAxisId="right" type="monotone" dataKey="DE" name="D/E (%)" stroke="#3498db" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} hide={hiddenDataKeys["DE"]} />
+                            </ComposedChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* Row 2 (Banks): NIM Trend and Funding & Costs */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+                      {/* Left: NIM Trend */}
+                      <div className="card">
+                        <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <Wallet color="#3498db" /> NIM Trend (Profitability)
+                        </h3>
+                        <div style={{ width: '100%', height: 300 }}>
+                          <ResponsiveContainer>
+                            <ComposedChart data={nimTrendData} margin={{ top: 20, right: 20, bottom: 5, left: 20 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                              <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
+                              <YAxis yAxisId="left" tickFormatter={(v) => v >= 1000 ? v/1000 + 'k' : v} tick={{ fill: '#3498db' }} axisLine={false} tickLine={false} />
+                              <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v + '%'} tick={{ fill: '#f39c12' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
+                              <Tooltip content={<CustomTooltip />} />
+                              <Legend />
+                              <Bar yAxisId="left" dataKey="NII" name="Net Interest Income" fill="#3498db" radius={[4, 4, 0, 0]} barSize={32} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                              <Line yAxisId="right" type="monotone" dataKey="NIM" name="NIM (%)" stroke="#f39c12" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                            </ComposedChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+
+                      {/* Right: Funding & Costs (YOEA vs COF) */}
+                      <div className="card">
+                        <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <PieChartIcon color="#9b59b6" /> Funding & Costs (YOEA vs COF)
+                        </h3>
+                        <div style={{ width: '100%', height: 300 }}>
+                          <ResponsiveContainer>
+                            <ComposedChart data={yoeaCofSpreadData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                              <defs>
+                                <linearGradient id="colorSpread" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="#3498db" stopOpacity={0.25}/>
+                                  <stop offset="95%" stopColor="#3498db" stopOpacity={0.05}/>
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                              <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
+                              <YAxis tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
+                              <Tooltip content={<CustomTooltip />} />
+                              <Legend />
+                              <Area type="monotone" dataKey="spread" name="Spread" stroke="none" fill="url(#colorSpread)" isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                              <Line type="monotone" dataKey="YOEA" name="YOEA (%)" stroke="#3498db" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                              <Line type="monotone" dataKey="COF" name="COF (%)" stroke="#e74c3c" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                            </ComposedChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Row 2.1 (Banks): LDR & COF Trend and Growth (Credit vs Deposits) */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+                      {/* Left: LDR & COF Trend */}
+                      <div className="card">
+                        <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <Activity color="#3498db" /> Loan to Deposit Ratio (LDR) & Cost of Funds (COF) Trend
+                        </h3>
+                        <div style={{ width: '100%', height: 300 }}>
+                          <ResponsiveContainer>
+                            <ComposedChart data={ldrSmlTrendData} margin={{ top: 20, right: 20, bottom: 5, left: 20 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                              <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
+                              <YAxis yAxisId="left" tickFormatter={(v) => v + '%'} tick={{ fill: '#3498db' }} axisLine={false} tickLine={false} dx={-10} domain={['auto', 'auto']} />
+                              <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v + '%'} tick={{ fill: '#f39c12' }} axisLine={false} tickLine={false} dx={10} domain={[0, 'auto']} />
+                              <Tooltip content={<CustomTooltip />} />
+                              <Legend />
+                              <Bar yAxisId="left" dataKey="LDR" name="LDR (%)" fill="#3498db" radius={[4, 4, 0, 0]} barSize={32} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                              <Line yAxisId="right" type="monotone" dataKey="COF" name="COF (%)" stroke="#f39c12" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                              <ReferenceLine yAxisId="left" y={85} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ position: 'top', value: 'NHNN Limit (85%)', fill: '#e74c3c', fontSize: 11, fontWeight: 600 }} />
+                            </ComposedChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+
+                      {/* Right: Growth (Credit vs Deposits) */}
+                      <div className="card">
+                        <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          <TrendingUp color="#1abc9c" /> Growth (Credit vs Deposits)
+                        </h3>
+                        <div style={{ width: '100%', height: 300 }}>
+                          <ResponsiveContainer>
+                            <LineChart data={growthTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                              <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
+                              <YAxis tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
+                              <Tooltip content={<CustomTooltip />} />
+                              <Legend />
+                              <Line type="monotone" dataKey="CreditGrowth" name="Credit Growth (%)" stroke="#1abc9c" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                              <Line type="monotone" dataKey="DepositGrowth" name="Deposit Growth (%)" stroke="#f39c12" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Row 2.2: F&B Cash Flow statement charts */}
+                {selectedIndustry === "Food & Beverage" && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+                    {/* Column 1: CFO & FCFE Trend */}
                     <div className="card">
                       <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <Activity color="#3498db" /> Loan to Deposit Ratio (LDR) & Cost of Funds (COF) Trend
+                        <Activity color="var(--accent-color)" /> CFO & FCFE Trend (B VND)
                       </h3>
                       <div style={{ width: '100%', height: 300 }}>
                         <ResponsiveContainer>
-                          <ComposedChart data={ldrSmlTrendData} margin={{ top: 20, right: 20, bottom: 5, left: 20 }}>
+                          <LineChart data={cashFlowTrendData} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
                             <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
-                            <YAxis yAxisId="left" tickFormatter={(v) => v + '%'} tick={{ fill: '#3498db' }} axisLine={false} tickLine={false} dx={-10} domain={['auto', 'auto']} />
-                            <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v + '%'} tick={{ fill: '#f39c12' }} axisLine={false} tickLine={false} dx={10} domain={[0, 'auto']} />
+                            <YAxis width={75} tickFormatter={(v) => formatNumber(v) + 'B'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
                             <Tooltip content={<CustomTooltip />} />
                             <Legend />
-                            <Bar yAxisId="left" dataKey="LDR" name="LDR (%)" fill="#3498db" radius={[4, 4, 0, 0]} barSize={32} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                            <Line yAxisId="right" type="monotone" dataKey="COF" name="COF (%)" stroke="#f39c12" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                            <ReferenceLine yAxisId="left" y={85} stroke="#e74c3c" strokeWidth={1.5} strokeDasharray="4 4" label={{ position: 'top', value: 'NHNN Limit (85%)', fill: '#e74c3c', fontSize: 11, fontWeight: 600 }} />
+                            <Line type="monotone" dataKey="CFO" name="CFO" stroke="#2ecc71" strokeWidth={2.5} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} />
+                            <Line type="monotone" dataKey="FCFE" name="FCFE" stroke="var(--accent-color)" strokeWidth={3.5} dot={{ r: 5 }} activeDot={{ r: 7 }} strokeDasharray="5 5" isAnimationActive={true} animationDuration={500} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    {/* Column 2: CFI & Components */}
+                    <div className="card">
+                      <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <BarChart3 color="#9b59b6" /> CFI & Components (B VND)
+                      </h3>
+                      <div style={{ width: '100%', height: 300 }}>
+                        <ResponsiveContainer>
+                          <ComposedChart data={cashFlowTrendData} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                            <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
+                            <YAxis width={75} tickFormatter={(v) => formatNumber(v) + 'B'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Legend />
+                            <Bar dataKey="CFINetCapex" name="Net Capex" fill="#e74c3c" stackId="cfi" barSize={15} isAnimationActive={true} />
+                            <Bar dataKey="CFINetLoans" name="Net Loans/Debt" fill="#1abc9c" stackId="cfi" barSize={15} isAnimationActive={true} />
+                            <Bar dataKey="CFIOther" name="Other Investing" fill="#95a5a6" stackId="cfi" barSize={15} isAnimationActive={true} />
+                            <Line type="monotone" dataKey="CFI" name="Total CFI" stroke="#9b59b6" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} />
                           </ComposedChart>
                         </ResponsiveContainer>
                       </div>
                     </div>
-                  )}
 
-                  <div className="card">
-                    <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <TrendingUp color="#1abc9c" /> Growth (Credit vs Deposits)
-                    </h3>
-                    <div style={{ width: '100%', height: 300 }}>
-                      <ResponsiveContainer>
-                        <LineChart data={growthTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
-                          <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
-                          <YAxis tickFormatter={(v) => v + '%'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
-                          <Tooltip content={<CustomTooltip />} />
-                          <Legend />
-                          <Line type="monotone" dataKey="CreditGrowth" name="Credit Growth (%)" stroke="#1abc9c" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                          <Line type="monotone" dataKey="DepositGrowth" name="Deposit Growth (%)" stroke="#f39c12" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                        </LineChart>
-                      </ResponsiveContainer>
+                    {/* Column 3: CFF & Components */}
+                    <div className="card">
+                      <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <BarChart3 color="#f39c12" /> CFF & Components (B VND)
+                      </h3>
+                      <div style={{ width: '100%', height: 300 }}>
+                        <ResponsiveContainer>
+                          <ComposedChart data={cashFlowTrendData} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                            <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
+                            <YAxis width={75} tickFormatter={(v) => formatNumber(v) + 'B'} tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Legend />
+                            <Bar dataKey="CFFShareIssue" name="Share Issue" fill="#2ecc71" stackId="cff" barSize={15} isAnimationActive={true} />
+                            <Bar dataKey="CFFShareRepurchase" name="Share Repurchase" fill="#c0392b" stackId="cff" barSize={15} isAnimationActive={true} />
+                            <Bar dataKey="CFFNetBorrowing" name="Net Borrowing" fill="#3498db" stackId="cff" barSize={15} isAnimationActive={true} />
+                            <Bar dataKey="CFFDividends" name="Dividends Paid" fill="#9b59b6" stackId="cff" barSize={15} isAnimationActive={true} />
+                            <Bar dataKey="CFFLease" name="Lease Payments" fill="#7f8c8d" stackId="cff" barSize={15} isAnimationActive={true} />
+                            <Bar dataKey="CFFOther" name="Other Financing" fill="#bdc3c7" stackId="cff" barSize={15} isAnimationActive={true} />
+                            <Line type="monotone" dataKey="CFF" name="Total CFF" stroke="#f39c12" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} />
+                          </ComposedChart>
+                        </ResponsiveContainer>
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
 
                 {/* Row 2.2: NPL & LLR vs SML (Asset Quality & Liquidity Risk) */}
-                <div style={{ display: 'grid', gridTemplateColumns: selectedIndustry === "Banks" ? '1fr 1fr' : '1fr', gap: '16px', marginBottom: '16px' }}>
-                  <div className="card">
-                    <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <Flame color="#e74c3c" /> NPL vs LLR (Asset Quality)
-                    </h3>
-                    <div style={{ width: '100%', height: 300 }}>
-                      <ResponsiveContainer>
-                        <LineChart data={assetQualityTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
-                          <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
-                          <YAxis yAxisId="left" tickFormatter={(v) => v + '%'} tick={{ fill: '#e74c3c' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
-                          <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v + '%'} tick={{ fill: '#2ecc71' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
-                          <Tooltip content={<CustomTooltip />} />
-                          <Legend />
-                          <Line yAxisId="left" type="monotone" dataKey="NPL" name="NPL (%)" stroke="#e74c3c" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                          <Line yAxisId="right" type="monotone" dataKey="LLR" name="LLR Coverage (%)" stroke="#2ecc71" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} strokeDasharray="5 5" isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
-                        </LineChart>
-                      </ResponsiveContainer>
+                {selectedIndustry === "Banks" && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+                    <div className="card">
+                      <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <Flame color="#e74c3c" /> NPL vs LLR (Asset Quality)
+                      </h3>
+                      <div style={{ width: '100%', height: 300 }}>
+                        <ResponsiveContainer>
+                          <LineChart data={assetQualityTrendData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" vertical={false} />
+                            <XAxis dataKey="period" tick={{ fill: 'var(--text-secondary)' }} axisLine={false} tickLine={false} dy={10} />
+                            <YAxis yAxisId="left" tickFormatter={(v) => v + '%'} tick={{ fill: '#e74c3c' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
+                            <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v + '%'} tick={{ fill: '#2ecc71' }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
+                            <Tooltip content={<CustomTooltip />} />
+                            <Legend />
+                            <Line yAxisId="left" type="monotone" dataKey="NPL" name="NPL (%)" stroke="#e74c3c" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                            <Line yAxisId="right" type="monotone" dataKey="LLR" name="LLR Coverage (%)" stroke="#2ecc71" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} strokeDasharray="5 5" isAnimationActive={true} animationDuration={500} animationEasing="ease-in-out" />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
                     </div>
-                  </div>
 
-                  {selectedIndustry === "Banks" && (
                     <div className="card">
                       <h3 style={{ fontSize: '1.4rem', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <ShieldCheck color="#2ecc71" /> Short-term Funds for Med/Long-term Loans (SML)
@@ -1693,8 +2711,8 @@ export default function Home() {
                         </ResponsiveContainer>
                       </div>
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
 
                 {/* Row 2.5: ROE vs ROA Trend & CAR Widget */}
                 <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px', marginBottom: '16px' }}>
@@ -1719,23 +2737,46 @@ export default function Home() {
                   </div>
 
                   <div className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
-                    <ShieldCheck size={48} color={carKPI.current > 8 ? '#2ecc71' : '#e74c3c'} style={{ marginBottom: '16px' }} />
-                    <h3 style={{ fontSize: '1.2rem', color: 'var(--text-secondary)', marginBottom: '8px' }}>CAR (Solvency KPI)</h3>
-                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '24px' }}>{carKPI.period}</p>
-                    
-                    <div style={{ fontSize: '4rem', fontWeight: 800, color: carKPI.current > 8 ? '#2ecc71' : '#e74c3c', lineHeight: 1 }}>
-                      {formatNumber(carKPI.current)}%
-                    </div>
-                    
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.2rem', color: carKPI.change >= 0 ? '#2ecc71' : '#e74c3c', fontWeight: 600, marginTop: '24px' }}>
-                      {carKPI.change >= 0 ? <TrendingUp size={24} /> : <TrendingDown size={24} />}
-                      {carKPI.change > 0 ? '+' : ''}{formatNumber(carKPI.change)}% vs Prev
-                    </div>
-                    
-                    {carKPI.current > 8 && (
-                      <div style={{ marginTop: '24px', padding: '8px 24px', backgroundColor: '#e8f8f5', color: '#27ae60', borderRadius: '20px', fontSize: '1rem', fontWeight: 600 }}>
-                        Safe Buffer (Basel II &gt; 8%)
-                      </div>
+                    {selectedIndustry === "Food & Beverage" ? (
+                      <>
+                        <ShieldCheck size={48} color={carKPI.current < 100 ? '#2ecc71' : carKPI.current < 150 ? '#f39c12' : '#e74c3c'} style={{ marginBottom: '16px' }} />
+                        <h3 style={{ fontSize: '1.2rem', color: 'var(--text-secondary)', marginBottom: '8px' }}>Debt / Equity (Leverage)</h3>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '24px' }}>{carKPI.period}</p>
+                        
+                        <div style={{ fontSize: '4.5rem', fontWeight: 800, color: carKPI.current < 100 ? '#2ecc71' : carKPI.current < 150 ? '#f39c12' : '#e74c3c', lineHeight: 1 }}>
+                          {formatNumber(carKPI.current)}%
+                        </div>
+                        
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.2rem', color: carKPI.change <= 0 ? '#2ecc71' : '#e74c3c', fontWeight: 600, marginTop: '24px' }}>
+                          {carKPI.change <= 0 ? <TrendingDown size={24} /> : <TrendingUp size={24} />}
+                          {carKPI.change > 0 ? '+' : ''}{formatNumber(carKPI.change)}% vs Prev
+                        </div>
+                        
+                        <div style={{ marginTop: '24px', padding: '8px 24px', backgroundColor: carKPI.current < 100 ? '#e8f8f5' : '#fef2f2', color: carKPI.current < 100 ? '#27ae60' : '#e74c3c', borderRadius: '20px', fontSize: '1rem', fontWeight: 600 }}>
+                          {carKPI.current < 100 ? 'Low Leverage (Safe < 100%)' : 'High Leverage'}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck size={48} color={carKPI.current > 8 ? '#2ecc71' : '#e74c3c'} style={{ marginBottom: '16px' }} />
+                        <h3 style={{ fontSize: '1.2rem', color: 'var(--text-secondary)', marginBottom: '8px' }}>CAR (Solvency KPI)</h3>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '24px' }}>{carKPI.period}</p>
+                        
+                        <div style={{ fontSize: '4rem', fontWeight: 800, color: carKPI.current > 8 ? '#2ecc71' : '#e74c3c', lineHeight: 1 }}>
+                          {formatNumber(carKPI.current)}%
+                        </div>
+                        
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.2rem', color: carKPI.change >= 0 ? '#2ecc71' : '#e74c3c', fontWeight: 600, marginTop: '24px' }}>
+                          {carKPI.change >= 0 ? <TrendingUp size={24} /> : <TrendingDown size={24} />}
+                          {carKPI.change > 0 ? '+' : ''}{formatNumber(carKPI.change)}% vs Prev
+                        </div>
+                        
+                        {carKPI.current > 8 && (
+                          <div style={{ marginTop: '24px', padding: '8px 24px', backgroundColor: '#e8f8f5', color: '#27ae60', borderRadius: '20px', fontSize: '1rem', fontWeight: 600 }}>
+                            Safe Buffer (Basel II &gt; 8%)
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>
